@@ -31,7 +31,7 @@ POSTGRES_USER ?= threatpulse
 POSTGRES_DB   ?= threatpulse
 
 .DEFAULT_GOAL := help
-.PHONY: help setup ssl up down logs update backup-db restore-db \
+.PHONY: help setup ssl ssl-duckdns up down logs update backup-db restore-db \
         shell-app shell-db create-admin seed status build dev dev-down
 
 help: ## Show this help
@@ -48,9 +48,13 @@ setup: ## Create .env.prod from the template
 	  echo ">>> Generate a secret with:  openssl rand -base64 32"; \
 	fi
 
-ssl: ## Obtain / renew Let's Encrypt certificates
+ssl: ## Obtain SSL via HTTP-01 (requires inbound port 80 reachable)
 	@chmod +x scripts/init-letsencrypt.sh
 	@./scripts/init-letsencrypt.sh
+
+ssl-duckdns: ## Obtain SSL via DuckDNS DNS-01 (no open ports needed)
+	@chmod +x scripts/init-letsencrypt-duckdns.sh scripts/duckdns-auth-hook.sh scripts/duckdns-cleanup-hook.sh
+	@./scripts/init-letsencrypt-duckdns.sh
 
 build: ## Build all production images
 	$(COMPOSE) build
