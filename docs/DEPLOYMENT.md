@@ -52,6 +52,48 @@ The `init-letsencrypt.sh` script:
 
 If validation fails, verify DNS and that ports 80/443 are reachable from the internet.
 
+### 3a. SSL for home servers / blocked port 80 (DuckDNS DNS-01)
+
+Many home/residential connections (and CGNAT setups) **block inbound port 80**, so the
+HTTP challenge above will fail with `Timeout during connect (likely firewall problem)`.
+
+If your domain is a **DuckDNS** domain (e.g. `chaugen.duckdns.org`), use the DNS-01
+challenge instead — it proves ownership via a DuckDNS TXT record and needs **no open
+inbound ports at all**.
+
+1. Add your DuckDNS credentials to `.env.prod`:
+
+   | Variable | Notes |
+   |----------|-------|
+   | `DUCKDNS_TOKEN` | The token shown at the top of <https://www.duckdns.org> after signing in |
+   | `DUCKDNS_SUBDOMAIN` | Just the label before `.duckdns.org` — e.g. `chaugen` for `chaugen.duckdns.org` |
+
+   Also make sure `DOMAIN=chaugen.duckdns.org` and `NEXTAUTH_URL=https://chaugen.duckdns.org`.
+
+2. Run the DNS-01 flow:
+
+   ```bash
+   make ssl-duckdns
+   ```
+
+   This publishes a TXT record via the DuckDNS API, waits for propagation, obtains a
+   **staging** cert, then prompts you to switch to a trusted **production** cert.
+
+3. Start the stack:
+
+   ```bash
+   make up
+   ```
+
+> **Renewal note:** the automatic `certbot` container renews via HTTP (webroot), which
+> will not work while port 80 is blocked. On a DNS-01 setup, renew by re-running
+> `make ssl-duckdns` (certs last 90 days). A simple cron entry keeps it current:
+>
+> ```bash
+> # renew every 60 days at 03:30
+> 30 3 */60 * * cd /home/user/threatpulse && yes y | make ssl-duckdns >> /var/log/threatpulse-ssl.log 2>&1
+> ```
+
 ## 4. Launch
 
 ```bash
