@@ -133,3 +133,48 @@ make update      # git pull + rebuild + restart + prune
 make down                                    # stop
 docker compose -f docker-compose.prod.yml down -v   # stop AND delete the database volume
 ```
+
+## Troubleshooting
+
+### `P1000: Authentication failed against database server`
+
+The app/collector connect to Postgres via a `postgresql://` **URL**. If your
+`POSTGRES_PASSWORD` contains URL-reserved characters (`@ : / # ? $ & ! ^ %`),
+the URL is parsed incorrectly and authentication fails — even though the
+password is technically valid for Postgres itself.
+
+**Fix — use an alphanumeric-only password and reset the DB volume:**
+
+```bash
+# 1. Stop the stack and DELETE the postgres volume (safe if you have no real
+#    data yet — this wipes the database).
+docker compose -f docker-compose.prod.yml down -v --remove-orphans
+
+# 2. Generate a URL-safe password:
+openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32; echo
+
+# 3. Edit .env.prod — set BOTH to the SAME new value:
+#      POSTGRES_PASSWORD=<the-new-alphanumeric-password>
+#      DATABASE_URL=postgresql://threatpulse:<the-new-alphanumeric-password>@postgres:5432/threatpulse
+
+# 4. Start fresh:
+make up
+make logs        # confirm "Database is ready" then schema push succeeds
+```
+
+> **Why delete the volume?** Postgres only applies `POSTGRES_PASSWORD` when it
+> *first* initializes its data directory. If you changed the password after the
+> volume already existed, the old password is still in effect until the volume
+> is recreated.
+
+### `Bind for :::443 failed: port is already allocated`
+
+Another process (or a leftover container) is holding port 80/443. Find and stop it:
+
+```bash
+sudo lsof -i :443          # identify the process
+docker ps                  # check for stray containers
+docker compose -f docker-compose.prod.yml down --remove-orphans
+```
+
+Then `make up` again.
