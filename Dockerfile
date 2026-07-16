@@ -28,6 +28,13 @@ COPY nextjs_space/ .
 # Fix Prisma output path for Docker context (schema references absolute dev path)
 RUN sed -i 's|output.*=.*"/home/ubuntu.*"|output = "./node_modules/.prisma/client"|' prisma/schema.prisma
 
+# The app's next.config pins outputFileTracingRoot to the PARENT dir (needed for
+# the original monorepo layout). In Docker the app is self-contained at /app, so
+# a parent tracing root nests the standalone build under an "app/" subfolder and
+# server.js ends up at .next/standalone/app/server.js. Pin the tracing root to
+# /app itself so server.js lands at .next/standalone/server.js as expected.
+RUN sed -i "s|outputFileTracingRoot: path.join(__dirname, '../'),|outputFileTracingRoot: __dirname,|" next.config.js
+
 # Generate Prisma client
 RUN npx prisma generate
 
