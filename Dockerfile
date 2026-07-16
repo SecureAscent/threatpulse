@@ -5,7 +5,8 @@
 
 # -- Base --------------------------------------------------------------------
 FROM node:20-alpine AS base
-RUN apk add --no-cache libc6-compat openssl
+# wget (busybox) is used by the container HEALTHCHECK; netcat by the entrypoint
+RUN apk add --no-cache libc6-compat openssl wget netcat-openbsd
 
 # -- Install dependencies ----------------------------------------------------
 FROM base AS deps
@@ -34,10 +35,21 @@ RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV NEXT_OUTPUT_MODE=standalone
-# Provide dummy vars needed at build time (overridden at runtime)
+
+# ── Build args (bake public config into the client bundle at build time) ─────
+# NEXT_PUBLIC_* values are inlined into the browser bundle by Next.js, so they
+# MUST be present during `yarn build`. Pass them via docker-compose build args.
+ARG NEXTAUTH_URL="http://localhost:3000"
+ARG NEXT_PUBLIC_APP_URL=""
+ARG NEXT_PUBLIC_APP_NAME="ThreatPulse Intel"
+
+ENV NEXTAUTH_URL=${NEXTAUTH_URL}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
+
+# Dummy secrets needed only to satisfy the build (never used at runtime)
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 ENV NEXTAUTH_SECRET="build-time-placeholder"
-ENV NEXTAUTH_URL="http://localhost:3000"
 
 RUN yarn build
 
@@ -92,5 +104,10 @@ RUN chown -R nextjs:nodejs /app/prisma-tools
 
 USER nextjs
 EXPOSE 3000
+
+# ── Health check ────────────────────────────────────────────────────────────
+# /login is a public 200 page (no auth/DB round-trip required to render).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:3000/login || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

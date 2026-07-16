@@ -5,7 +5,7 @@
 **Open-source threat intelligence platform for healthcare cybersecurity teams**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.prod.yml)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql)](https://www.postgresql.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)](https://nextjs.org/)
 
@@ -13,205 +13,158 @@
 
 ---
 
-ThreatPulse Intel aggregates, normalizes, and triages threat intelligence from **18 sources** into a single dashboard. Built for healthcare security operations teams who need CVE tracking, IOC management, TTP mapping, and integration with existing tooling (Jira, Cybellum SBOM, H-ISAC, Brevo).
+ThreatPulse Intel aggregates, normalizes, and triages threat intelligence into a single dashboard. It ships as a **complete, production-ready Docker stack** — Next.js app, PostgreSQL, an automated intelligence **collector worker**, and an Nginx + Let's Encrypt reverse proxy — that a sysadmin can deploy anywhere Docker runs.
 
-## ✨ Features
+## ✨ What you get
 
-| Feature | Description |
-|---------|-------------|
-| **18 Intelligence Sources** | CISA KEV, NVD, H-ISAC, Hacker News, Bleeping Computer, Dark Reading, Krebs, SecurityWeek, SANS ISC, Rapid7, MSRC, US-CERT, UK NCSC, Exploit-DB, Packet Storm, CrowdStrike, Mandiant, Infosecurity Magazine |
-| **Dashboard** | Severity distribution, source breakdown, 14-day trend lines, real-time metrics |
-| **CVE Database** | Searchable CVE table with severity filtering and CVSS scores |
-| **Threat Feed** | Unified feed from all sources with type/severity/source filters |
-| **RBAC** | SUPERADMIN → ADMIN → ANALYST role hierarchy |
-| **Integrations** | Jira (ticketing), Cybellum (SBOM), H-ISAC (healthcare IOCs), Brevo (email alerts) |
-| **Feed Management** | Enable/disable individual sources, customize collection frequency, test endpoints |
-| **Advisory Export** | Export threat advisories via Email, Teams, or clipboard |
-| **Executive Brief** | KPI cards and severity/status breakdowns for leadership |
-| **Policy Engine** | SLA definitions, triage workflow, escalation procedures |
-| **Product Portfolio** | Cybellum-integrated product risk tracking |
-| **CSV/JSON Upload** | Bulk import threats from files |
-| **Multi-tenant** | Organization-scoped data isolation |
-| **Dark Mode** | Cybersecurity-themed dark UI (default) with light mode option |
+- **Automated intelligence collection** — a background worker ingests CISA KEV, NVD CVEs, and 11 security RSS feeds every 15 minutes (configurable).
+- **Multi-user RBAC** — `SUPERADMIN → ADMIN → ANALYST`, with organization-scoped data isolation.
+- **HTTPS out of the box** — Nginx TLS termination with automatic Let's Encrypt certificates and renewal.
+- **One-command ops** — a `Makefile` wraps setup, SSL, backups, admin creation, and more.
 
-## 🚀 Quick Start
+## ✅ Prerequisites
 
-### Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/) v2+
-- That's it. No Node.js, no PostgreSQL, no other dependencies.
+- **Docker 24+** and **Docker Compose v2** (`docker compose`, not `docker-compose`)
+- A **domain name** with an `A`/`AAAA` record pointing at the server's public IP (required for SSL)
+- Ports **80** and **443** open to the internet
 
-### Deploy
+> No Node.js or PostgreSQL install needed on the host — everything runs in containers.
+
+## 🚀 Quick start (5 steps)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/threatpulse-intel.git
-cd threatpulse-intel
+# 1. Clone
+git clone https://github.com/EyesMindOpen/threatpulse.git
+cd threatpulse
 
-# Configure
-cp .env.docker .env
-nano .env                    # Set NEXTAUTH_SECRET and NEXTAUTH_URL
+# 2. Create and edit the environment file
+make setup                # copies .env.prod.example -> .env.prod
+nano .env.prod            # set DOMAIN, NEXTAUTH_URL, NEXTAUTH_SECRET, POSTGRES_PASSWORD, DATABASE_URL, CERTBOT_EMAIL
+                          # generate a secret with:  openssl rand -base64 32
 
-# Launch
-docker compose up -d --build
+# 3. Obtain SSL certificates (staging first, then prompts for production)
+make ssl
 
-# Watch startup
-docker compose logs -f app
+# 4. Launch the full stack
+make up
+
+# 5. Create your first SUPERADMIN
+make create-admin
 ```
 
-First boot automatically creates tables, seeds demo data, and starts the app.
+Then browse to `https://yourdomain.com` and log in. Follow logs with `make logs`.
 
-### Default Credentials
-
-| Role | Email | Password |
-|------|-------|----------|
-| **Admin** | `admin@threatpulse.com` | `admin123!` |
-| **Analyst** | `analyst@threatpulse.com` | `analyst123!` |
-
-> ⚠️ **Change these immediately** after your first login.
+> **Local development** (no SSL, hot reload): `make dev` → http://localhost:3000
+> Full documentation lives in the [`docs/`](docs/) folder — start with [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## 🖥️ Architecture
 
 ```
-┌────────────────────────────────────────────────┐
-│              Docker Compose Stack               │
-│                                                │
-│  ┌───────────────┐    ┌────────────────────┐   │
-│  │  PostgreSQL   │    │  ThreatPulse Intel  │   │
-│  │  15-alpine    │◄───│  Next.js 14        │   │
-│  │  :5432        │    │  Prisma ORM        │   │
-│  │  pgdata vol   │    │  NextAuth.js       │   │
-│  └───────────────┘    │  :3000             │   │
-│                       └────────────────────┘   │
-│                                                │
-└────────────────────────────────────────────────┘
+                          Internet
+                             │  :80 / :443
+                    ┌────────▼─────────┐
+                    │      nginx        │  TLS termination, HTTP→HTTPS,
+                    │   (reverse proxy) │  security headers, gzip, caching
+                    └────────┬─────────┘
+                             │ :3000 (internal)
+                    ┌────────▼─────────┐        ┌────────────────────┐
+                    │       app         │        │      certbot        │
+                    │  Next.js 14       │        │  Let's Encrypt SSL  │
+                    │  Prisma + NextAuth│        │  auto-renewal       │
+                    └────────┬─────────┘        └────────────────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                     │
+┌───────▼────────┐  ┌────────▼─────────┐          │
+│    postgres     │◄─┤    collector      │          │
+│  15-alpine      │  │  KEV / NVD / RSS  │  every   │
+│  (internal only)│  │  worker (node)    │  15 min  │
+│  pgdata volume  │  └───────────────────┘          │
+└─────────────────┘                                 │
+        ▲                                            │
+        └──────────── all services on ──────────────┘
+                    threatpulse-net (bridge)
 ```
 
 | Component | Technology | Purpose |
-|-----------|------------|--------|
-| Frontend | Next.js 14, React 18, Tailwind CSS, Recharts | Dashboard, pages, charts |
-| Backend | Next.js API Routes, Prisma ORM | REST API, data layer |
-| Auth | NextAuth.js v4 (credentials + JWT) | Session management, RBAC |
-| Database | PostgreSQL 15 | Threat storage, user management |
-| Container | Docker, multi-stage Alpine builds | Deployment |
+|-----------|------------|---------|
+| Proxy | Nginx (alpine) + Certbot | TLS, HTTP→HTTPS, security headers, gzip |
+| Frontend/Backend | Next.js 14 (standalone), Prisma | Dashboard, REST API, auth |
+| Auth | NextAuth.js v4 (credentials + JWT) | Sessions, RBAC |
+| Database | PostgreSQL 15 | Threats, users, integrations |
+| Collector | Node.js + axios + rss-parser + node-cron + pg | Automated feed ingestion |
 
-## 📁 Project Structure
+## ⚙️ Environment variables
 
-```
-threatpulse-intel/
-├── Dockerfile                    # Multi-stage production build
-├── docker-compose.yml            # Full stack definition
-├── docker/
-│   └── docker-entrypoint.sh      # Auto-migrate, seed, start
-├── .env.docker                   # Environment template
-└── nextjs_space/                 # Application source
-    ├── app/
-    │   ├── (app)/                # Authenticated pages
-    │   │   ├── dashboard/        # Main dashboard + charts
-    │   │   ├── cve-database/     # CVE search & filter
-    │   │   ├── threat-feed/      # Unified threat feed
-    │   │   ├── threats/          # Threat detail + CRUD
-    │   │   ├── integrations/     # Feed + service config
-    │   │   ├── admin/            # Org + user management
-    │   │   ├── executive-brief/  # Leadership KPIs
-    │   │   ├── how-it-works/     # Platform documentation
-    │   │   ├── policy/           # SLA & governance
-    │   │   ├── product-portfolio/# Cybellum integration
-    │   │   └── upload/           # CSV/JSON import
-    │   └── api/                  # REST API routes
-    ├── components/               # Reusable UI (shadcn/ui)
-    ├── lib/                      # Auth, DB, types, utils
-    ├── prisma/                   # Database schema
-    └── scripts/                  # Seed data
-```
+Set these in `.env.prod` (see [`.env.prod.example`](.env.prod.example)):
 
-## ⚙️ Configuration
+| Variable | Required | Default | Description |
+|----------|:---:|---------|-------------|
+| `POSTGRES_USER` | | `threatpulse` | Database user |
+| `POSTGRES_PASSWORD` | ✅ | — | Database password (also in `DATABASE_URL`) |
+| `POSTGRES_DB` | | `threatpulse` | Database name |
+| `DATABASE_URL` | ✅ | — | Full Postgres URL (host = `postgres`) |
+| `NEXTAUTH_URL` | ✅ | — | Public HTTPS URL of the app |
+| `NEXTAUTH_SECRET` | ✅ | — | JWT signing secret (`openssl rand -base64 32`) |
+| `DOMAIN` | ✅ | — | Bare domain for SSL (no scheme) |
+| `CERTBOT_EMAIL` | ✅ | — | Email for Let's Encrypt notices |
+| `COLLECTOR_INTERVAL_MINUTES` | | `15` | Collection frequency |
+| `COLLECTOR_ORG_SLUG` | | `threatpulse-demo` | Org that collected threats attach to |
+| `NVD_API_KEY` | | — | Optional NVD key for higher rate limits |
+| `NEXT_PUBLIC_APP_NAME` | | `ThreatPulse Intel` | App name in the client bundle |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_USER` | `threatpulse` | Database username |
-| `POSTGRES_PASSWORD` | `threatpulse_secret` | Database password |
-| `POSTGRES_DB` | `threatpulse_db` | Database name |
-| `DB_PORT` | `5432` | Exposed PostgreSQL port |
-| `APP_PORT` | `3000` | Exposed app port |
-| `NEXTAUTH_URL` | `http://localhost:3000` | Public URL of the app |
-| `NEXTAUTH_SECRET` | *(generate!)* | `openssl rand -base64 32` |
+## 🔌 Intelligence sources (collector)
 
-## 🔒 RBAC Roles
+- **CISA KEV** — Known Exploited Vulnerabilities catalog (JSON)
+- **NVD** — NIST CVE feed with CVSS scoring (REST API v2)
+- **RSS** — US-CERT/CISA, CISA Alerts, Krebs on Security, Bleeping Computer, Dark Reading, SANS ISC, Threatpost, SecurityWeek, Recorded Future, Unit 42, Talos Intelligence
+
+Each item is normalized into the `Threat` model and deduped by `threatId`. Analyst-set `status` (NEW / INVESTIGATING / RESOLVED) is **never** overwritten by re-collection.
+
+## 🛠️ Make targets
+
+| Target | Description |
+|--------|-------------|
+| `make setup` | Create `.env.prod` from the template |
+| `make ssl` | Obtain / renew Let's Encrypt certificates |
+| `make up` | Start the production stack (build + detached) |
+| `make down` | Stop the stack |
+| `make logs` | Follow all logs |
+| `make update` | Pull, rebuild images, restart |
+| `make backup-db` | Dump DB to `backups/<timestamp>.sql.gz` |
+| `make restore-db` | Restore from the latest backup |
+| `make shell-app` | Shell into the app container |
+| `make shell-db` | Open a `psql` shell |
+| `make create-admin` | Create a SUPERADMIN user |
+| `make seed` | Run the seed script |
+| `make status` | `docker compose ps` |
+| `make dev` / `make dev-down` | Start / stop the dev stack (hot reload) |
+
+## 🔒 RBAC roles
 
 | Role | Capabilities |
 |------|--------------|
-| **SUPERADMIN** | Full platform control, cross-org access, user/integration management |
-| **ADMIN** | Organization admin, manage users, configure integrations, SLA settings |
+| **SUPERADMIN** | Full platform control, cross-org, user/integration management |
+| **ADMIN** | Org admin: manage users, configure integrations, SLA settings |
 | **ANALYST** | View dashboard, triage threats, export advisories, search/filter |
 
-## 🔌 Intelligence Sources
+## 🧯 Troubleshooting (quick reference)
 
-### Public APIs
-- **CISA KEV** — Known Exploited Vulnerabilities catalog
-- **NVD (NIST)** — National Vulnerability Database (CVSS scores)
+| Symptom | Likely fix |
+|---------|-----------|
+| `make ssl` fails to validate domain | Confirm DNS `A` record → server IP and ports 80/443 open |
+| Browser warns about the certificate | You're on the **staging** cert — re-run `make ssl` and choose production |
+| App can't reach DB | Check `DATABASE_URL` password matches `POSTGRES_PASSWORD`; `make status` |
+| Login redirect loop / CSRF errors | `NEXTAUTH_URL` must exactly match the browser URL (https + domain) |
+| Collector inserts nothing | Ensure the app seeded an org, or set `COLLECTOR_ORG_SLUG`; see `docker compose -f docker-compose.prod.yml logs collector` |
+| NVD collection slow / rate-limited | Set `NVD_API_KEY` in `.env.prod` |
 
-### RSS Feeds (16 sources)
-The Hacker News, Bleeping Computer, Dark Reading, Krebs on Security, SecurityWeek, SANS ISC, Rapid7, Microsoft MSRC, US-CERT/CISA, UK NCSC, Exploit-DB, Packet Storm, CrowdStrike, Mandiant, Infosecurity Magazine
-
-### Authenticated
-- **H-ISAC** — Healthcare sector bulletins (HMAC-SHA1 auth)
-
-## 🛠️ Operations
-
-```bash
-# Start / Stop
-docker compose up -d
-docker compose down
-
-# Rebuild after code changes
-docker compose up -d --build
-
-# View logs
-docker compose logs -f app
-docker compose logs -f db
-
-# Database shell
-docker compose exec db psql -U threatpulse -d threatpulse_db
-
-# App container shell
-docker compose exec app sh
-
-# Full reset (destroys all data!)
-docker compose down -v
-docker compose up -d --build
-```
-
-## 🌐 Reverse Proxy
-
-For production deployments behind Nginx:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name threatpulse.yourdomain.com;
-
-    ssl_certificate     /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-Set `NEXTAUTH_URL=https://threatpulse.yourdomain.com` in your `.env`.
+More detail: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [docs/COLLECTOR.md](docs/COLLECTOR.md) · [docs/OPERATIONS.md](docs/OPERATIONS.md)
 
 ## 📄 License
 
 [Apache License 2.0](LICENSE) — Copyright 2024 Curtis Haugen
 
-## 🤝 Contributing
+## 🤝 Contributing & Security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## 🛡️ Security
-
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and deployment best practices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

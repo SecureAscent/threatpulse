@@ -1,1 +1,22 @@
 base44/.app.jsonc
+
+# Environment files (secrets)
+.env
+.env.prod
+.env.*.local
+
+# Database backups
+backups/
+
+# Let's Encrypt / certbot data
+certbot/
+
+# Nginx runtime SSL material
+nginx/ssl/
+
+# Collector build output & deps
+collector/dist/
+collector/node_modules/
+
+# Logs
+*.log
