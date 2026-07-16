@@ -4,7 +4,7 @@
 ###############################################################################
 
 # -- Base --------------------------------------------------------------------
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 # wget (busybox) is used by the container HEALTHCHECK; netcat by the entrypoint
 RUN apk add --no-cache libc6-compat openssl wget netcat-openbsd
 
