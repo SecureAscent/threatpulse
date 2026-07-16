@@ -60,9 +60,33 @@ fi
 
 # ── Skip if a real certificate is already present ────────────────────────────
 if [ -d "$CERT_PATH" ]; then
-  echo "==> Existing certificate found at $CERT_PATH — nothing to do."
-  echo "    (Delete that directory to force re-issuance.)"
-  exit 0
+  # Check if it's a staging cert (contains "staging" in the issuer)
+  if openssl x509 -in "$CERT_PATH/fullchain.pem" -noout -issuer 2>/dev/null | grep -qi "staging"; then
+    echo "==> Found STAGING certificate at $CERT_PATH."
+    read -r -p "Replace with a PRODUCTION (trusted) certificate now? [y/N] " ANSWER
+    if [ "${ANSWER:-N}" != "y" ] && [ "${ANSWER:-N}" != "Y" ]; then
+      echo "==> Keeping staging certificate. Re-run this script when ready."
+      exit 0
+    fi
+    # User wants production — delete staging and continue to production request
+    echo "==> Deleting staging certificate"
+    $COMPOSE run --rm --no-deps --entrypoint "\
+      rm -Rf /etc/letsencrypt/live/$DOMAIN && \
+      rm -Rf /etc/letsencrypt/archive/$DOMAIN && \
+      rm -Rf /etc/letsencrypt/renewal/$DOMAIN.conf" certbot
+    # Fall through to request production cert (skip staging step)
+    SKIP_STAGING=1
+  else
+    # Production cert already exists
+    echo "==> Existing PRODUCTION certificate found at $CERT_PATH — nothing to do."
+    echo "    (Delete that directory to force re-issuance.)"
+    echo ""
+    echo "======================================================================="
+    echo " SUCCESS — https://$DOMAIN already has a trusted certificate."
+    echo " Run 'make up' to start the stack if not already running."
+    echo "======================================================================="
+    exit 0
+  fi
 fi
 
 # ── Recommended TLS params + webroot dirs ────────────────────────────────────
@@ -100,28 +124,30 @@ run_certbot() {
 }
 
 # ── 1. STAGING certificate (avoids hitting production rate limits) ───────────
-echo ""
-echo "==> Requesting a STAGING certificate for $DOMAIN via DuckDNS DNS-01"
-run_certbot "--staging"
+if [ "${SKIP_STAGING:-0}" != "1" ]; then
+  echo ""
+  echo "==> Requesting a STAGING certificate for $DOMAIN via DuckDNS DNS-01"
+  run_certbot "--staging"
 
-echo ""
-echo "-----------------------------------------------------------------------"
-echo " Staging certificate obtained successfully via DNS-01."
-echo " (Staging certs are UNTRUSTED — browsers will warn. That's expected.)"
-echo "-----------------------------------------------------------------------"
-read -r -p "Switch to a PRODUCTION (trusted) certificate now? [y/N] " ANSWER
+  echo ""
+  echo "-----------------------------------------------------------------------"
+  echo " Staging certificate obtained successfully via DNS-01."
+  echo " (Staging certs are UNTRUSTED — browsers will warn. That's expected.)"
+  echo "-----------------------------------------------------------------------"
+  read -r -p "Switch to a PRODUCTION (trusted) certificate now? [y/N] " ANSWER
 
-if [ "${ANSWER:-N}" != "y" ] && [ "${ANSWER:-N}" != "Y" ]; then
-  echo "==> Keeping staging certificate. Re-run this script when ready."
-  exit 0
+  if [ "${ANSWER:-N}" != "y" ] && [ "${ANSWER:-N}" != "Y" ]; then
+    echo "==> Keeping staging certificate. Re-run this script when ready."
+    exit 0
+  fi
+
+  # ── 2. Replace staging with a PRODUCTION certificate ─────────────────────────
+  echo "==> Deleting staging certificate"
+  $COMPOSE run --rm --no-deps --entrypoint "\
+    rm -Rf /etc/letsencrypt/live/$DOMAIN && \
+    rm -Rf /etc/letsencrypt/archive/$DOMAIN && \
+    rm -Rf /etc/letsencrypt/renewal/$DOMAIN.conf" certbot
 fi
-
-# ── 2. Replace staging with a PRODUCTION certificate ─────────────────────────
-echo "==> Deleting staging certificate"
-$COMPOSE run --rm --no-deps --entrypoint "\
-  rm -Rf /etc/letsencrypt/live/$DOMAIN && \
-  rm -Rf /etc/letsencrypt/archive/$DOMAIN && \
-  rm -Rf /etc/letsencrypt/renewal/$DOMAIN.conf" certbot
 
 echo "==> Requesting PRODUCTION certificate for $DOMAIN via DuckDNS DNS-01"
 run_certbot ""
