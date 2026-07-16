@@ -18,7 +18,6 @@ cd "$(dirname "$0")/.."   # repo root
 
 COMPOSE="docker compose -f docker-compose.prod.yml"
 ENV_FILE=".env.prod"
-NGINX_CONF="nginx/conf.d/threatpulse.conf"
 
 # ── Load config ─────────────────────────────────────────────────────────────
 if [ ! -f "$ENV_FILE" ]; then
@@ -37,13 +36,9 @@ CERT_PATH="certbot/conf/live/$DOMAIN"
 echo "==> Domain:  $DOMAIN"
 echo "==> Email:   $CERTBOT_EMAIL"
 
-# ── Inject the real domain into the nginx server block ───────────────────────
-if grep -q "__DOMAIN__" "$NGINX_CONF"; then
-  echo "==> Writing domain into $NGINX_CONF"
-  sed -i.bak "s/__DOMAIN__/$DOMAIN/g" "$NGINX_CONF" && rm -f "${NGINX_CONF}.bak"
-else
-  echo "==> nginx conf already configured for a domain (no __DOMAIN__ token)."
-fi
+# NOTE: the domain is injected into the nginx server block automatically by the
+# nginx container at startup (envsubst on nginx/templates/*.template), so there
+# is nothing to sed here. This survives git pull/reset.
 
 # ── Skip if a real certificate is already present ────────────────────────────
 if [ -d "$CERT_PATH" ] && [ ! -f "$CERT_PATH/.dummy" ]; then
