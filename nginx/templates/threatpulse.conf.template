@@ -33,9 +33,12 @@ server {
     server_name ${DOMAIN};
 
     # ── SSL (Let's Encrypt) ───────────────────────────────────────────────
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    ssl_trusted_certificate /etc/letsencrypt/live/${DOMAIN}/chain.pem;
+    #ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    #ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    #ssl_trusted_certificate /etc/letsencrypt/live/${DOMAIN}/chain.pem;
+ssl_certificate     /etc/letsencrypt/live/${DOMAIN}-0001/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}-0001/privkey.pem;
+ssl_trusted_certificate /etc/letsencrypt/live/${DOMAIN}-0001/chain.pem;
 
     ssl_session_timeout 1d;
     ssl_session_cache   shared:SSL:10m;
