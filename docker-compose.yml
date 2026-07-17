@@ -43,8 +43,8 @@ services:
       - "${APP_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-threatpulse}:${POSTGRES_PASSWORD:-threatpulse_secret}@db:5432/${POSTGRES_DB:-threatpulse_db}?connect_timeout=15
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-in-production-use-openssl-rand-base64-32}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://chaugen.duckdns.org:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-7J2k9L4mN6pQ8rS1tU3vW5xY0zA2bC4dE6fG8hI0jK2}
     depends_on:
       db:
         condition: service_healthy
