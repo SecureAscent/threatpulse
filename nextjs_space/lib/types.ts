@@ -26,11 +26,24 @@ export interface ThreatItem {
   organizationId: string;
 }
 
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt?: string;
+  _count?: {
+    users: number;
+    threats: number;
+  };
+}
+
 export interface OrgUser {
   id: string;
   name: string | null;
   email: string;
   role: string;
+  organizationId: string | null;
+  organization: Pick<OrganizationSummary, 'id' | 'name' | 'slug'> | null;
   createdAt: string;
 }
 
