@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { writeAuditEvent } from '@/lib/audit';
 import {
   buildThreatScope,
   getTenantContext,
@@ -36,7 +37,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const existing = await prisma.threat.findFirst({
       where: { id: params?.id, ...buildThreatScope(context) },
-      select: { id: true },
+      select: {
+        id: true,
+        threatId: true,
+        departmentId: true,
+        status: true,
+        severity: true,
+      },
     });
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -51,6 +58,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         ...(affectedAssets !== undefined ? { affectedAssets } : {}),
       },
     });
+
+    const changedFields = [
+      status !== undefined ? 'status' : null,
+      severity !== undefined ? 'severity' : null,
+      description !== undefined ? 'description' : null,
+      affectedAssets !== undefined ? 'affectedAssets' : null,
+    ].filter((field): field is string => Boolean(field));
+
+    await writeAuditEvent({
+      context,
+      action: 'threat.updated',
+      entityType: 'Threat',
+      entityId: threat.id,
+      departmentId: threat.departmentId,
+      metadata: {
+        threatId: threat.threatId,
+        changedFields,
+        previousStatus: existing.status,
+        newStatus: threat.status,
+        previousSeverity: existing.severity,
+        newSeverity: threat.severity,
+      },
+    });
+
     return NextResponse.json({ threat });
   } catch (error) {
     console.error('PATCH threat error:', error);
@@ -68,11 +99,24 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const existing = await prisma.threat.findFirst({
       where: { id: params?.id, ...buildThreatScope(context) },
-      select: { id: true },
+      select: { id: true, threatId: true, departmentId: true, severity: true, type: true },
     });
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     await prisma.threat.delete({ where: { id: existing.id } });
+    await writeAuditEvent({
+      context,
+      action: 'threat.deleted',
+      entityType: 'Threat',
+      entityId: existing.id,
+      departmentId: existing.departmentId,
+      metadata: {
+        threatId: existing.threatId,
+        severity: existing.severity,
+        type: existing.type,
+      },
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('DELETE threat error:', error);
