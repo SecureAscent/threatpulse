@@ -29,6 +29,7 @@ restart_services() {
 
 on_exit() {
   status=$?
+  trap - EXIT INT TERM HUP
   cleanup_migration_sessions
   restart_services
   exit "$status"
