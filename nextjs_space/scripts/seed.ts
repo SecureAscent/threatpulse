@@ -35,14 +35,12 @@ const sampleThreats = [
 async function main() {
   console.log('Seeding database...');
 
-  // Upsert default organization
   const org = await prisma.organization.upsert({
     where: { slug: 'threatpulse-demo' },
     update: { name: 'ThreatPulse Demo' },
     create: { name: 'ThreatPulse Demo', slug: 'threatpulse-demo' },
   });
 
-  // Upsert test admin user
   const hashedPw = await bcrypt.hash('johndoe123', 12);
   await prisma.user.upsert({
     where: { email: 'john@doe.com' },
@@ -56,7 +54,6 @@ async function main() {
     },
   });
 
-  // Upsert admin user for demo
   const adminPw = await bcrypt.hash('admin123!', 12);
   await prisma.user.upsert({
     where: { email: 'admin@threatpulse.com' },
@@ -70,7 +67,6 @@ async function main() {
     },
   });
 
-  // Upsert analyst user for demo
   const analystPw = await bcrypt.hash('analyst123!', 12);
   await prisma.user.upsert({
     where: { email: 'analyst@threatpulse.com' },
@@ -84,10 +80,14 @@ async function main() {
     },
   });
 
-  // Upsert sample threats
   for (const threat of sampleThreats) {
     await prisma.threat.upsert({
-      where: { threatId: threat.threatId },
+      where: {
+        organizationId_threatId: {
+          organizationId: org.id,
+          threatId: threat.threatId,
+        },
+      },
       update: { ...threat, organizationId: org.id },
       create: { ...threat, organizationId: org.id },
     });
