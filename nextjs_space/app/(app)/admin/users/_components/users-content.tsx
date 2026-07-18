@@ -1,16 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
+import { Building2, Network, Shield, Trash2, User, UserPlus, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Building2, Shield, Trash2, User, UserPlus, Users } from 'lucide-react';
 import { FadeIn } from '@/components/ui/animate';
-import type { OrganizationSummary, OrgUser } from '@/lib/types';
-import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -20,8 +21,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import type { OrganizationSummary, OrgUser } from '@/lib/types';
 
 async function getErrorMessage(response: Response, fallback: string) {
   try {
@@ -46,96 +46,61 @@ export default function UsersContent() {
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('ANALYST');
   const [newOrganizationId, setNewOrganizationId] = useState('');
+  const [newDepartmentId, setNewDepartmentId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
+  const effectiveNewOrganizationId = isSuperAdmin
+    ? newOrganizationId
+    : (sessionUser?.organizationId ?? organizations[0]?.id ?? '');
+
+  const newUserDepartments = useMemo(
+    () => organizations.find((organization) => organization.id === effectiveNewOrganizationId)?.departments ?? [],
+    [organizations, effectiveNewOrganizationId],
+  );
+
   const fetchUsers = async () => {
-    try {
-      const response = await fetch('/api/admin/users', { cache: 'no-store' });
-      if (!response.ok) {
-        toast.error(await getErrorMessage(response, 'Failed to load users'));
-        return;
-      }
-      const data = await response.json();
-      setUsers(data?.users ?? []);
-    } catch (error) {
-      console.error('Fetch users error:', error);
-      toast.error('Failed to load users');
-    }
+    const response = await fetch('/api/admin/users', { cache: 'no-store' });
+    if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to load users'));
+    const data = await response.json();
+    setUsers(data?.users ?? []);
   };
 
   const fetchOrganizations = async () => {
-    try {
-      const response = await fetch('/api/admin/orgs', { cache: 'no-store' });
-      if (!response.ok) return;
-      const data = await response.json();
-      const nextOrganizations = data?.organizations ?? [];
-      setOrganizations(nextOrganizations);
-
-      if (!newOrganizationId && nextOrganizations.length === 1) {
-        setNewOrganizationId(nextOrganizations[0].id);
-      }
-    } catch (error) {
-      console.error('Fetch organizations error:', error);
+    const response = await fetch('/api/admin/orgs', { cache: 'no-store' });
+    if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to load organizations'));
+    const data = await response.json();
+    const nextOrganizations: OrganizationSummary[] = data?.organizations ?? [];
+    setOrganizations(nextOrganizations);
+    if (!newOrganizationId && nextOrganizations.length === 1) {
+      setNewOrganizationId(nextOrganizations[0].id);
     }
   };
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      await Promise.all([fetchUsers(), fetchOrganizations()]);
-      setLoading(false);
-    };
-    load();
+    Promise.all([fetchUsers(), fetchOrganizations()])
+      .catch((error) => toast.error(error instanceof Error ? error.message : 'Failed to load user management'))
+      .finally(() => setLoading(false));
   }, []);
 
   const replaceUser = (updated: OrgUser) => {
     setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
   };
 
-  const updateRole = async (userId: string, role: string) => {
+  const patchUser = async (userId: string, changes: Record<string, unknown>, success: string) => {
     setUpdatingUserId(userId);
     try {
       const response = await fetch('/api/admin/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, role }),
+        body: JSON.stringify({ userId, ...changes }),
       });
-
-      if (!response.ok) {
-        toast.error(await getErrorMessage(response, 'Failed to update role'));
-        return;
-      }
-
+      if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to update user'));
       const data = await response.json();
       replaceUser(data.user);
-      toast.success('Role updated');
-    } catch {
-      toast.error('Failed to update role');
-    } finally {
-      setUpdatingUserId(null);
-    }
-  };
-
-  const updateOrganization = async (userId: string, organizationId: string) => {
-    setUpdatingUserId(userId);
-    try {
-      const response = await fetch('/api/admin/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, organizationId }),
-      });
-
-      if (!response.ok) {
-        toast.error(await getErrorMessage(response, 'Failed to assign organization'));
-        return;
-      }
-
-      const data = await response.json();
-      replaceUser(data.user);
-      toast.success('Organization assignment updated');
-    } catch {
-      toast.error('Failed to assign organization');
+      toast.success(success);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update user');
     } finally {
       setUpdatingUserId(null);
     }
@@ -143,13 +108,11 @@ export default function UsersContent() {
 
   const handleAddUser = async (event: React.FormEvent) => {
     event.preventDefault();
-
     if (!newName.trim() || !newEmail.trim() || !newPassword) {
       toast.error('Please fill in all required fields');
       return;
     }
-
-    if (isSuperAdmin && !newOrganizationId) {
+    if (!effectiveNewOrganizationId) {
       toast.error('Select an organization');
       return;
     }
@@ -164,15 +127,11 @@ export default function UsersContent() {
           email: newEmail,
           password: newPassword,
           role: newRole,
-          ...(isSuperAdmin ? { organizationId: newOrganizationId } : {}),
+          ...(isSuperAdmin ? { organizationId: effectiveNewOrganizationId } : {}),
+          departmentId: newDepartmentId || null,
         }),
       });
-
-      if (!response.ok) {
-        toast.error(await getErrorMessage(response, 'Failed to add user'));
-        return;
-      }
-
+      if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to add user'));
       const data = await response.json();
       setUsers((current) => [data.user, ...current]);
       setOpen(false);
@@ -180,12 +139,10 @@ export default function UsersContent() {
       setNewEmail('');
       setNewPassword('');
       setNewRole('ANALYST');
-      if (!isSuperAdmin && organizations.length === 1) {
-        setNewOrganizationId(organizations[0].id);
-      }
+      setNewDepartmentId('');
       toast.success('User added successfully');
-    } catch {
-      toast.error('Error adding user');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to add user');
     } finally {
       setSubmitting(false);
     }
@@ -193,123 +150,66 @@ export default function UsersContent() {
 
   const handleDeleteUser = async (userId: string) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
-
     setUpdatingUserId(userId);
     try {
-      const response = await fetch(`/api/admin/users?userId=${encodeURIComponent(userId)}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        toast.error(await getErrorMessage(response, 'Failed to delete user'));
-        return;
-      }
-
+      const response = await fetch(`/api/admin/users?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to delete user'));
       setUsers((current) => current.filter((user) => user.id !== userId));
       toast.success('User deleted successfully');
-    } catch {
-      toast.error('Error deleting user');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete user');
     } finally {
       setUpdatingUserId(null);
     }
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-[1100px] mx-auto">
+    <div className="p-6 space-y-6 max-w-[1250px] mx-auto">
       <FadeIn>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-display font-bold tracking-tight">User Management</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage members, roles, and organization assignments
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">Manage members, roles, organizations, and departments.</p>
           </div>
-
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button size="sm" className="gap-2 self-start sm:self-auto">
-                <UserPlus className="w-4 h-4" />
-                Add User
-              </Button>
+              <Button size="sm" className="gap-2"><UserPlus className="w-4 h-4" />Add User</Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[460px]">
+            <DialogContent className="sm:max-w-[480px]">
               <form onSubmit={handleAddUser}>
                 <DialogHeader>
                   <DialogTitle>Add New Member</DialogTitle>
-                  <DialogDescription>
-                    Create a user and assign their initial role and organization.
-                  </DialogDescription>
+                  <DialogDescription>Create a user and assign their role, organization, and department.</DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
+                  <div className="grid gap-2"><Label htmlFor="name">Full Name</Label><Input id="name" value={newName} onChange={(event) => setNewName(event.target.value)} required /></div>
+                  <div className="grid gap-2"><Label htmlFor="email">Email address</Label><Input id="email" type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} required /></div>
+                  <div className="grid gap-2"><Label htmlFor="password">Temporary Password</Label><Input id="password" type="password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></div>
                   <div className="grid gap-2">
-                    <Label htmlFor="name">Full Name</Label>
-                    <Input
-                      id="name"
-                      placeholder="Jane Doe"
-                      value={newName}
-                      onChange={(event) => setNewName(event.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="email">Email address</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="jane@example.com"
-                      value={newEmail}
-                      onChange={(event) => setNewEmail(event.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="password">Temporary Password</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      minLength={8}
-                      placeholder="At least 8 characters"
-                      value={newPassword}
-                      onChange={(event) => setNewPassword(event.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="role">Role</Label>
-                    <Select value={newRole} onValueChange={setNewRole}>
-                      <SelectTrigger id="role"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ADMIN">Admin</SelectItem>
-                        <SelectItem value="ANALYST">Analyst</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label>Role</Label>
+                    <Select value={newRole} onValueChange={setNewRole}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="ANALYST">Analyst</SelectItem></SelectContent></Select>
                   </div>
                   {isSuperAdmin && (
                     <div className="grid gap-2">
-                      <Label htmlFor="organization">Organization</Label>
-                      <Select value={newOrganizationId} onValueChange={setNewOrganizationId}>
-                        <SelectTrigger id="organization">
-                          <SelectValue placeholder="Select an organization" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {organizations.map((organization) => (
-                            <SelectItem key={organization.id} value={organization.id}>
-                              {organization.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
+                      <Label>Organization</Label>
+                      <Select value={newOrganizationId} onValueChange={(value) => { setNewOrganizationId(value); setNewDepartmentId(''); }}>
+                        <SelectTrigger><SelectValue placeholder="Select an organization" /></SelectTrigger>
+                        <SelectContent>{organizations.map((organization) => <SelectItem key={organization.id} value={organization.id}>{organization.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   )}
+                  <div className="grid gap-2">
+                    <Label>Department</Label>
+                    <Select value={newDepartmentId || 'none'} onValueChange={(value) => setNewDepartmentId(value === 'none' ? '' : value)} disabled={!effectiveNewOrganizationId}>
+                      <SelectTrigger><SelectValue placeholder="Select a department" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Organization-wide / Unassigned</SelectItem>
+                        {newUserDepartments.map((department) => <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={submitting}>
-                    {submitting ? 'Creating...' : 'Save Member'}
-                  </Button>
-                </DialogFooter>
+                <DialogFooter><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={submitting}>{submitting ? 'Creating...' : 'Save Member'}</Button></DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
@@ -318,106 +218,39 @@ export default function UsersContent() {
 
       <FadeIn delay={0.05}>
         <Card className="border-border/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Users className="w-4 h-4 text-muted-foreground" />
-              Members ({users.length})
-            </CardTitle>
-          </CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4 text-muted-foreground" />Members ({users.length})</CardTitle></CardHeader>
           <CardContent className="p-0 overflow-x-auto">
-            {loading ? (
-              <div className="space-y-2 p-6">
-                {[1, 2, 3].map((item) => <div key={item} className="h-12 bg-muted animate-pulse rounded" />)}
-              </div>
-            ) : users.length === 0 ? (
-              <div className="text-center py-12">
-                <User className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No users found</p>
-              </div>
-            ) : (
+            {loading ? <div className="p-6 text-sm text-muted-foreground">Loading users...</div> : users.length === 0 ? <div className="py-12 text-center text-sm text-muted-foreground">No users found.</div> : (
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Organization</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Joined</TableHead>
-                    <TableHead className="w-[220px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Organization</TableHead><TableHead>Department</TableHead><TableHead>Role</TableHead><TableHead className="w-[190px]">Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {users.map((user) => {
                     const isUpdating = updatingUserId === user.id;
+                    const userOrganization = organizations.find((organization) => organization.id === user.organizationId);
+                    const departments = userOrganization?.departments ?? [];
                     return (
                       <TableRow key={user.id}>
-                        <TableCell className="font-medium text-sm">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center">
-                              {user.role === 'ADMIN'
-                                ? <Shield className="w-3.5 h-3.5 text-primary" />
-                                : <User className="w-3.5 h-3.5 text-muted-foreground" />}
-                            </div>
-                            {user.name ?? 'Unknown'}
-                          </div>
-                        </TableCell>
+                        <TableCell className="font-medium"><div className="flex items-center gap-2">{user.role === 'ADMIN' ? <Shield className="w-4 h-4 text-primary" /> : <User className="w-4 h-4" />}{user.name ?? 'Unknown'}</div></TableCell>
                         <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                         <TableCell>
                           {isSuperAdmin ? (
-                            <Select
-                              value={user.organizationId ?? ''}
-                              onValueChange={(value) => updateOrganization(user.id, value)}
-                              disabled={isUpdating}
-                            >
-                              <SelectTrigger className="h-8 min-w-[160px]">
-                                <SelectValue placeholder="Unassigned" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {organizations.map((organization) => (
-                                  <SelectItem key={organization.id} value={organization.id}>
-                                    {organization.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
+                            <Select value={user.organizationId ?? ''} onValueChange={(value) => patchUser(user.id, { organizationId: value, departmentId: null }, 'Organization updated')} disabled={isUpdating}>
+                              <SelectTrigger className="h-8 min-w-[165px]"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                              <SelectContent>{organizations.map((organization) => <SelectItem key={organization.id} value={organization.id}>{organization.name}</SelectItem>)}</SelectContent>
                             </Select>
-                          ) : (
-                            <div className="flex items-center gap-2 text-sm">
-                              <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
-                              <span>{user.organization?.name ?? 'Unassigned'}</span>
-                            </div>
-                          )}
+                          ) : <div className="flex items-center gap-2 text-sm"><Building2 className="w-3.5 h-3.5" />{user.organization?.name ?? 'Unassigned'}</div>}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={user.role === 'ADMIN' ? 'bg-primary/10 text-primary border-primary/20 text-[10px]' : 'text-[10px]'}>
-                            {user.role}
-                          </Badge>
+                          <Select value={user.departmentId ?? 'none'} onValueChange={(value) => patchUser(user.id, { departmentId: value === 'none' ? null : value }, 'Department updated')} disabled={isUpdating || !user.organizationId}>
+                            <SelectTrigger className="h-8 min-w-[165px]"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                            <SelectContent><SelectItem value="none">Organization-wide / Unassigned</SelectItem>{departments.map((department) => <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>)}</SelectContent>
+                          </Select>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(user.createdAt).toLocaleDateString()}
-                        </TableCell>
+                        <TableCell><Badge variant="outline">{user.role}</Badge></TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <Select
-                              value={user.role}
-                              onValueChange={(value) => updateRole(user.id, value)}
-                              disabled={isUpdating}
-                            >
-                              <SelectTrigger className="h-8 w-[110px]"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="ADMIN">Admin</SelectItem>
-                                <SelectItem value="ANALYST">Analyst</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              onClick={() => handleDeleteUser(user.id)}
-                              disabled={isUpdating || user.id === sessionUser?.id}
-                              aria-label={`Delete ${user.name ?? user.email}`}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                            <Select value={user.role} onValueChange={(value) => patchUser(user.id, { role: value }, 'Role updated')} disabled={isUpdating}><SelectTrigger className="h-8 w-[110px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="ANALYST">Analyst</SelectItem></SelectContent></Select>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteUser(user.id)} disabled={isUpdating || user.id === sessionUser?.id}><Trash2 className="w-4 h-4" /></Button>
                           </div>
                         </TableCell>
                       </TableRow>
