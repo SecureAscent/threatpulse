@@ -1,99 +1,141 @@
-export const dynamic = 'force-dynamic';
-import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth-options';
+import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { hash } from 'bcryptjs';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 
-async function getAdminUser() {
+async function isAdmin() {
   const session = await getServerSession(authOptions);
-  const user = session?.user as any;
-  if (!user || (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN')) return null;
-  return user;
+  return session?.user?.role === 'ADMIN';
 }
 
 export async function GET() {
   try {
-    const user = await getAdminUser();
-    if (!user) return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    if (!(await isAdmin())) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
 
     const users = await prisma.user.findMany({
-      where: { organizationId: user.organizationId },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
-      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
 
     return NextResponse.json({ users });
   } catch (error: any) {
-    console.error('Admin users error:', error);
-    return NextResponse.json({ error: 'Failed' }, { status: 500 });
+    console.error('[USERS_GET_ERROR]', error);
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const user = await getAdminUser();
-    if (!user) return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    if (!(await isAdmin())) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
 
     const body = await req.json();
-    const { name, email, password, role = 'ANALYST' } = body ?? {};
+    const { name, email, password, role } = body;
 
     if (!name || !email || !password) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
     }
 
-    if (role === 'SUPERADMIN' && user.role !== 'SUPERADMIN') {
-      return NextResponse.json({ error: 'Cannot create SUPERADMIN' }, { status: 403 });
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingUser) {
+      return NextResponse.json({ message: 'User with this email already exists' }, { status: 400 });
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return NextResponse.json({ error: 'User exists' }, { status: 400 });
+    const hashedPassword = await hash(password, 10);
 
-    const created = await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         name,
         email,
-        password: await hash(password, 10),
-        role,
-        organizationId: user.organizationId,
+        password: hashedPassword,
+        role: role || 'ANALYST',
       },
     });
 
     return NextResponse.json({
-      user: { id: created.id, name: created.name, email: created.email, role: created.role },
+      message: 'User created successfully',
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+      },
     }, { status: 201 });
+
   } catch (error: any) {
-    console.error('Admin create user error:', error);
-    return NextResponse.json({ error: 'Failed' }, { status: 500 });
+    console.error('[USERS_POST_ERROR]', error);
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-export async function PATCH(req: NextRequest) {
+export async function PATCH(req: Request) {
   try {
-    const user = await getAdminUser();
-    if (!user) return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-
-    const body = await req.json();
-    const { userId, role } = body ?? {};
-    if (!userId || !role) return NextResponse.json({ error: 'userId and role required' }, { status: 400 });
-
-    if (role === 'SUPERADMIN' && user.role !== 'SUPERADMIN') {
-      return NextResponse.json({ error: 'Cannot assign SUPERADMIN' }, { status: 403 });
+    if (!(await isAdmin())) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const target = await prisma.user.findFirst({
-      where: { id: userId, organizationId: user.organizationId },
-    });
-    if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const body = await req.json();
+    const { userId, role } = body;
 
-    const updated = await prisma.user.update({
+    if (!userId || !role) {
+      return NextResponse.json({ message: 'Missing userId or role' }, { status: 400 });
+    }
+
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: { role },
     });
 
-    return NextResponse.json({ user: { id: updated.id, name: updated.name, email: updated.email, role: updated.role } });
+    return NextResponse.json({
+      message: 'Role updated successfully',
+      user: updatedUser,
+    });
   } catch (error: any) {
-    console.error('Admin update user error:', error);
-    return NextResponse.json({ error: 'Failed' }, { status: 500 });
+    console.error('[USERS_PATCH_ERROR]', error);
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    if (!(await isAdmin())) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    if (!userId) {
+      return NextResponse.json({ message: 'Missing userId parameter' }, { status: 400 });
+    }
+
+    const session = await getServerSession(authOptions);
+    if (session?.user?.id === userId) {
+      return NextResponse.json({ message: 'You cannot delete your own admin account' }, { status: 400 });
+    }
+
+    await prisma.user.delete({
+      where: { id: userId },
+    });
+
+    return NextResponse.json({ message: 'User deleted successfully' });
+  } catch (error: any) {
+    console.error('[USERS_DELETE_ERROR]', error);
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
   }
 }
