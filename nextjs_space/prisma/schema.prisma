@@ -29,6 +29,7 @@ model Organization {
   users                User[]
   threats              Threat[]
   integrationConfigs   IntegrationConfig[]
+  auditEvents          AuditEvent[]
 
   @@index([parentOrganizationId])
 }
@@ -110,6 +111,25 @@ model IntegrationConfig {
 
   @@unique([organizationId, integrationId])
   @@index([organizationId])
+}
+
+model AuditEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorUserId    String
+  actorRole      String
+  action         String
+  entityType     String
+  entityId       String?
+  departmentId   String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, action])
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
 }
 
 model Account {
