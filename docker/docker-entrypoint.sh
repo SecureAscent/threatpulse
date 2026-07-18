@@ -23,8 +23,70 @@ until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
 done
 echo "Database is ready"
 
-echo "Pushing database schema..."
+# Older ThreatPulse versions treated threatId as globally unique. Before adding
+# the tenant-scoped compound unique constraint, remove only duplicate records
+# that share the same organizationId and threatId. The newest row is retained.
+echo "Checking for duplicate tenant threat records..."
 cd /app/prisma-tools
+NODE_PATH=/app/prisma-tools/node_modules node <<'NODE'
+const { PrismaClient } = require('.prisma/client');
+const prisma = new PrismaClient();
+
+async function main() {
+  const tableExists = await prisma.$queryRawUnsafe(`
+    SELECT to_regclass('public."Threat"') AS table_name
+  `);
+
+  if (!tableExists?.[0]?.table_name) {
+    console.log('Threat table does not exist yet; skipping duplicate cleanup');
+    return;
+  }
+
+  const columnExists = await prisma.$queryRawUnsafe(`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'Threat'
+      AND column_name = 'organizationId'
+    LIMIT 1
+  `);
+
+  if (!columnExists.length) {
+    console.log('organizationId column does not exist yet; skipping duplicate cleanup');
+    return;
+  }
+
+  const removed = await prisma.$executeRawUnsafe(`
+    WITH ranked AS (
+      SELECT
+        "id",
+        ROW_NUMBER() OVER (
+          PARTITION BY "organizationId", "threatId"
+          ORDER BY "lastUpdated" DESC NULLS LAST, "dateAdded" DESC NULLS LAST, "id" ASC
+        ) AS row_number
+      FROM "Threat"
+      WHERE "organizationId" IS NOT NULL
+    )
+    DELETE FROM "Threat" AS threat
+    USING ranked
+    WHERE threat."id" = ranked."id"
+      AND ranked.row_number > 1
+  `);
+
+  console.log(`Duplicate cleanup complete; removed ${removed} duplicate threat record(s)`);
+}
+
+main()
+  .catch((error) => {
+    console.error('Duplicate threat cleanup failed:', error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+NODE
+
+echo "Pushing database schema..."
 npx prisma db push --schema=./prisma/schema.prisma --skip-generate 2>&1 || {
   echo "Schema push failed, retrying with accept-data-loss..."
   npx prisma db push --schema=./prisma/schema.prisma --skip-generate --accept-data-loss 2>&1
