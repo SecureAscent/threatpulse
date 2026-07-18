@@ -7,6 +7,7 @@
 #   make down         stop the stack
 #   make logs         follow all logs
 #   make update       pull, rebuild images, restart
+#   make migrate      safely apply the Prisma schema in production
 #   make backup-db    dump the database to backups/<timestamp>.sql.gz
 #   make restore-db   restore from the latest backup
 #   make shell-app    shell into the app container
@@ -16,9 +17,9 @@
 #   make status       docker compose ps
 # ═══════════════════════════════════════════════════════════════════════════
 
-COMPOSE      := docker compose -f docker-compose.prod.yml
-COMPOSE_DEV  := docker compose -f docker-compose.dev.yml
 ENV_FILE     := .env.prod
+COMPOSE      := docker compose --env-file $(ENV_FILE) -f docker-compose.prod.yml
+COMPOSE_DEV  := docker compose -f docker-compose.dev.yml
 BACKUP_DIR   := backups
 TS           := $(shell date +%Y%m%d_%H%M%S)
 
@@ -31,7 +32,7 @@ POSTGRES_USER ?= threatpulse
 POSTGRES_DB   ?= threatpulse
 
 .DEFAULT_GOAL := help
-.PHONY: help setup ssl ssl-duckdns up down logs update backup-db restore-db \
+.PHONY: help setup ssl ssl-duckdns up down logs update migrate backup-db restore-db \
         shell-app shell-db create-admin seed status build dev dev-down
 
 help: ## Show this help
@@ -77,6 +78,10 @@ update: ## Pull latest code, rebuild images, restart
 	@echo "==> Pruning dangling images"
 	-docker image prune -f
 
+migrate: ## Safely apply the Prisma schema with backup, writer shutdown, and timeouts
+	@chmod +x scripts/safe-db-push.sh
+	@./scripts/safe-db-push.sh
+
 backup-db: ## Dump the database to backups/<timestamp>.sql.gz
 	@mkdir -p $(BACKUP_DIR)
 	@echo "==> Backing up database to $(BACKUP_DIR)/db_$(TS).sql.gz"
@@ -107,7 +112,7 @@ status: ## Show container status
 	$(COMPOSE) ps
 
 # ── Development helpers ──────────────────────────────────────────────────────
-dev: ## Start the dev stack (hot reload, no SSL)
+dev: ## Start the dev stack (hot reload)
 	$(COMPOSE_DEV) up --build
 
 dev-down: ## Stop the dev stack
