@@ -95,7 +95,6 @@ model Threat {
   @@index([organizationId, type])
   @@index([organizationId, severity])
   @@index([organizationId, status])
-  @@index([departmentId])
   @@index([dateAdded])
 }
 
