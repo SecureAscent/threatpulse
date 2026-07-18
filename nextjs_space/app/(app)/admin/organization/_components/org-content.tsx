@@ -67,8 +67,6 @@ export default function OrgContent() {
     }
   };
 
-  const allOrganizations = parents.flatMap((parent) => parent.organizations);
-
   if (loading) return <div className="p-6"><div className="h-64 rounded-xl bg-muted animate-pulse" /></div>;
 
   if (!isSuperAdmin && organization) {
