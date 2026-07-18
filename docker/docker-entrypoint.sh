@@ -34,24 +34,25 @@ const prisma = new PrismaClient();
 
 async function main() {
   const tableExists = await prisma.$queryRawUnsafe(`
-    SELECT to_regclass('public."Threat"') AS table_name
+    SELECT (to_regclass('public."Threat"') IS NOT NULL) AS exists
   `);
 
-  if (!tableExists?.[0]?.table_name) {
+  if (!tableExists?.[0]?.exists) {
     console.log('Threat table does not exist yet; skipping duplicate cleanup');
     return;
   }
 
   const columnExists = await prisma.$queryRawUnsafe(`
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'Threat'
-      AND column_name = 'organizationId'
-    LIMIT 1
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'Threat'
+        AND column_name = 'organizationId'
+    ) AS exists
   `);
 
-  if (!columnExists.length) {
+  if (!columnExists?.[0]?.exists) {
     console.log('organizationId column does not exist yet; skipping duplicate cleanup');
     return;
   }
