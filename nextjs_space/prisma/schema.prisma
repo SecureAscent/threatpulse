@@ -8,40 +8,75 @@ datasource db {
     url      = env("DATABASE_URL")
 }
 
+model ParentOrganization {
+  id            String         @id @default(cuid())
+  name          String
+  slug          String         @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  organizations Organization[]
+}
+
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users              User[]
-  threats            Threat[]
-  integrationConfigs IntegrationConfig[]
+  id                   String              @id @default(cuid())
+  parentOrganizationId String?
+  name                 String
+  slug                 String
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  parentOrganization   ParentOrganization? @relation(fields: [parentOrganizationId], references: [id])
+  departments          Department[]
+  users                User[]
+  threats              Threat[]
+  integrationConfigs   IntegrationConfig[]
+
+  @@unique([parentOrganizationId, slug])
+  @@index([parentOrganizationId])
+}
+
+model Department {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users          User[]
+  threats        Threat[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
 }
 
 model User {
-  id             String       @id @default(cuid())
+  id             String        @id @default(cuid())
   name           String?
-  email          String       @unique
+  email          String        @unique
   emailVerified  DateTime?
   image          String?
   password       String
-  role           String       @default("ANALYST")
+  role           String        @default("ANALYST")
   organizationId String?
+  departmentId   String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
   accounts       Account[]
   sessions       Session[]
+
+  @@index([organizationId])
+  @@index([departmentId])
 }
 
 model Threat {
-  id             String       @id @default(cuid())
-  threatId       String       @unique
+  id             String        @id @default(cuid())
+  threatId       String
   title          String
   type           String
   severity       String
-  status         String       @default("NEW")
+  status         String        @default("NEW")
   description    String?
   affectedAssets String?
   source         String?
@@ -49,14 +84,18 @@ model Threat {
   mitreTactic    String?
   mitreTechnique String?
   cvssScore      Float?
-  dateAdded      DateTime     @default(now())
-  lastUpdated    DateTime     @updatedAt
+  dateAdded      DateTime      @default(now())
+  lastUpdated    DateTime      @updatedAt
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  departmentId   String?
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  department     Department?   @relation(fields: [departmentId], references: [id])
 
+  @@unique([organizationId, threatId])
   @@index([organizationId, type])
   @@index([organizationId, severity])
   @@index([organizationId, status])
+  @@index([departmentId])
   @@index([dateAdded])
 }
 
