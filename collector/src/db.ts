@@ -29,15 +29,10 @@ pool.on('error', (err) => {
   log.error('Unexpected idle client error', err.message);
 });
 
-/**
- * Prisma generates `cuid()` ids in the application layer, so the DB column has
- * no default. We generate a compatible collision-resistant id here.
- */
 export function generateId(): string {
   return 'clc' + Date.now().toString(36) + randomBytes(8).toString('hex');
 }
 
-/** Wait until the database is reachable (Postgres may still be starting). */
 export async function waitForDatabase(retries = 30, delayMs = 2000): Promise<void> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -54,14 +49,16 @@ export async function waitForDatabase(retries = 30, delayMs = 2000): Promise<voi
 }
 
 /**
- * Resolve the organization that collected threats are attached to.
- * Threats are org-scoped, so the collector needs a target org.
- *   - Prefers COLLECTOR_ORG_SLUG (default "threatpulse-demo")
- *   - Falls back to the oldest organization in the table
- * Returns null if no organization exists yet (app seeds one on first boot).
+ * Resolve the explicit organization that collected threats are attached to.
+ * This intentionally fails closed: it never chooses another organization when
+ * COLLECTOR_ORG_SLUG is missing or invalid.
  */
 export async function resolveOrganizationId(): Promise<string | null> {
-  const slug = process.env.COLLECTOR_ORG_SLUG || 'threatpulse-demo';
+  const slug = process.env.COLLECTOR_ORG_SLUG?.trim();
+  if (!slug) {
+    log.error('COLLECTOR_ORG_SLUG is required; refusing to select a tenant implicitly.');
+    return null;
+  }
 
   const bySlug = await pool.query<{ id: string }>(
     'SELECT id FROM "Organization" WHERE slug = $1 LIMIT 1',
@@ -69,23 +66,15 @@ export async function resolveOrganizationId(): Promise<string | null> {
   );
   if (bySlug.rows.length > 0) return bySlug.rows[0].id;
 
-  const first = await pool.query<{ id: string }>(
-    'SELECT id FROM "Organization" ORDER BY "createdAt" ASC LIMIT 1',
-  );
-  if (first.rows.length > 0) {
-    log.warn(`Org slug "${slug}" not found; using oldest organization instead.`);
-    return first.rows[0].id;
-  }
-
+  log.error(`Organization slug "${slug}" was not found; collection will be skipped.`);
   return null;
 }
 
-/** Normalized threat record ready to upsert. */
 export interface ThreatRecord {
   threatId: string;
   title: string;
-  type: string; // CVE | IOC | TTP | NEWS
-  severity: string; // CRITICAL | HIGH | MEDIUM | LOW
+  type: string;
+  severity: string;
   description?: string | null;
   affectedAssets?: string | null;
   source?: string | null;
@@ -101,10 +90,8 @@ export interface UpsertResult {
 }
 
 /**
- * Upsert a batch of threats keyed by the unique `threatId`.
- * On conflict we refresh the intelligence fields but PRESERVE the analyst's
- * workflow `status` (NEW / INVESTIGATING / RESOLVED) so collection never
- * clobbers triage work.
+ * Upsert a batch of threats using the tenant-scoped unique key.
+ * Analyst workflow status is preserved on updates.
  */
 export async function upsertThreats(
   records: ThreatRecord[],
@@ -129,7 +116,7 @@ export async function upsertThreats(
             $7, $8, $9, $10, $11,
             $12, $13, $13, $14
          )
-         ON CONFLICT ("threatId") DO UPDATE SET
+         ON CONFLICT ("organizationId", "threatId") DO UPDATE SET
             title = EXCLUDED.title,
             type = EXCLUDED.type,
             severity = EXCLUDED.severity,
