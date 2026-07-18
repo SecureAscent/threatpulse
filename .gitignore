@@ -20,3 +20,4 @@ collector/node_modules/
 
 # Logs
 *.log
+node_modules/
