@@ -4,6 +4,30 @@ import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 
+const AUTH_REFRESH_INTERVAL_MS = 60_000;
+
+async function loadAuthorizationState(userId: string) {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      organization: { include: { parentOrganization: true } },
+      department: true,
+    },
+  });
+}
+
+function applyAuthorizationState(token: any, user: any) {
+  token.role = user.role;
+  token.organizationId = user.organizationId;
+  token.organizationName = user.organization?.name ?? null;
+  token.departmentId = user.departmentId;
+  token.departmentName = user.department?.name ?? null;
+  token.parentOrganizationId = user.organization?.parentOrganizationId ?? null;
+  token.parentOrganizationName = user.organization?.parentOrganization?.name ?? null;
+  token.authorizationRefreshedAt = Date.now();
+  token.accessRevoked = false;
+}
+
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   providers: [
@@ -48,14 +72,27 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }: any) {
       if (user) {
-        token.role = user.role;
-        token.organizationId = user.organizationId;
-        token.organizationName = user.organizationName;
-        token.departmentId = user.departmentId;
-        token.departmentName = user.departmentName;
-        token.parentOrganizationId = user.parentOrganizationId;
-        token.parentOrganizationName = user.parentOrganizationName;
+        applyAuthorizationState(token, user);
+        return token;
       }
+
+      const refreshedAt = Number(token.authorizationRefreshedAt || 0);
+      if (token.sub && Date.now() - refreshedAt >= AUTH_REFRESH_INTERVAL_MS) {
+        try {
+          const currentUser = await loadAuthorizationState(String(token.sub));
+          if (!currentUser || !currentUser.organizationId) {
+            token.accessRevoked = true;
+            token.organizationId = null;
+            token.departmentId = null;
+            token.authorizationRefreshedAt = Date.now();
+          } else {
+            applyAuthorizationState(token, currentUser);
+          }
+        } catch (error) {
+          console.error('Failed to refresh authorization state:', error);
+        }
+      }
+
       return token;
     },
     async session({ session, token }: any) {
@@ -68,6 +105,7 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).departmentName = token.departmentName;
         (session.user as any).parentOrganizationId = token.parentOrganizationId;
         (session.user as any).parentOrganizationName = token.parentOrganizationName;
+        (session.user as any).accessRevoked = Boolean(token.accessRevoked);
       }
       return session;
     },
