@@ -12,58 +12,82 @@ function slugify(name: string, fallback: string) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 64)
     .replace(/-+$/g, '');
+
   return value || fallback;
 }
 
-async function uniqueParentSlug(name: string) {
-  const base = slugify(name, 'parent');
-  let slug = base;
-  let suffix = 2;
-  while (await prisma.parentOrganization.findUnique({ where: { slug }, select: { id: true } })) {
-    const tail = `-${suffix++}`;
-    slug = `${base.slice(0, 64 - tail.length).replace(/-+$/g, '')}${tail}`;
-  }
-  return slug;
-}
-
 async function main() {
+  const rootName = process.env.DEFAULT_PARENT_ORG_NAME?.trim() || 'ThreatPulse Root';
+  const rootSlug = process.env.DEFAULT_PARENT_ORG_SLUG?.trim() || slugify(rootName, 'threatpulse-root');
+
+  const root = await prisma.parentOrganization.upsert({
+    where: { slug: rootSlug },
+    update: { name: rootName },
+    create: { name: rootName, slug: rootSlug },
+    select: { id: true, name: true },
+  });
+
   const organizations = await prisma.organization.findMany({
     include: { departments: { select: { id: true, slug: true } } },
     orderBy: { createdAt: 'asc' },
   });
 
   for (const organization of organizations) {
-    let parentOrganizationId = organization.parentOrganizationId;
-
-    if (!parentOrganizationId) {
-      const parentName = `${organization.name} Parent`;
-      const parent = await prisma.parentOrganization.create({
-        data: { name: parentName, slug: await uniqueParentSlug(parentName) },
-        select: { id: true },
-      });
-      parentOrganizationId = parent.id;
+    if (!organization.parentOrganizationId) {
       await prisma.organization.update({
         where: { id: organization.id },
-        data: { parentOrganizationId },
+        data: { parentOrganizationId: root.id },
       });
-      console.log(`Attached ${organization.name} to new parent ${parentName}`);
+      console.log(`Attached ${organization.name} to parent ${root.name}`);
     }
 
     let general = organization.departments.find((department) => department.slug === 'general');
+
     if (!general) {
       general = await prisma.department.create({
-        data: { organizationId: organization.id, name: 'General', slug: 'general' },
+        data: {
+          organizationId: organization.id,
+          name: 'General',
+          slug: 'general',
+        },
         select: { id: true, slug: true },
       });
       console.log(`Created General department for ${organization.name}`);
     }
 
     const users = await prisma.user.updateMany({
-      where: { organizationId: organization.id, departmentId: null },
+      where: {
+        organizationId: organization.id,
+        departmentId: null,
+      },
       data: { departmentId: general.id },
     });
-    if (users.count) console.log(`Assigned ${users.count} user(s) to ${organization.name} / General`);
+
+    const threats = await prisma.threat.updateMany({
+      where: {
+        organizationId: organization.id,
+        departmentId: null,
+      },
+      data: { departmentId: general.id },
+    });
+
+    if (users.count > 0) {
+      console.log(`Assigned ${users.count} user(s) to ${organization.name} / General`);
+    }
+
+    if (threats.count > 0) {
+      console.log(`Assigned ${threats.count} threat(s) to ${organization.name} / General`);
+    }
   }
+
+  const orphanUsers = await prisma.user.count({ where: { organizationId: null } });
+  if (orphanUsers > 0) {
+    throw new Error(
+      `${orphanUsers} user(s) have no organization. Assign them before enabling tenant isolation.`,
+    );
+  }
+
+  console.log('Hierarchy migration completed successfully');
 }
 
 main()
