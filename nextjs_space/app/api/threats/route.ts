@@ -1,17 +1,20 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
+import {
+  buildThreatScope,
+  canAssignDepartment,
+  getTenantContext,
+  hasPermission,
+} from '@/lib/tenant-context';
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    const organizationId = user.organizationId as string | null;
-    const departmentId = user.departmentId as string | null;
-    if (!organizationId) return NextResponse.json({ threats: [] });
+    const context = await getTenantContext();
+    if (!context) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!hasPermission(context, 'threats.read')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const url = new URL(req.url);
     const type = url.searchParams.get('type');
@@ -19,20 +22,18 @@ export async function GET(req: NextRequest) {
     const status = url.searchParams.get('status');
     const search = url.searchParams.get('search');
 
-    const where: any = {
-      organizationId,
-      ...(departmentId ? { OR: [{ departmentId }, { departmentId: null }] } : {}),
-    };
+    const where: any = buildThreatScope(context);
     if (type) where.type = type;
     if (severity) where.severity = severity;
     if (status) where.status = status;
     if (search) {
-      const searchFields = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { threatId: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
-      where.AND = [{ OR: searchFields }];
+      where.AND = [{
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { threatId: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+        ],
+      }];
     }
 
     const threats = await prisma.threat.findMany({ where, orderBy: { dateAdded: 'desc' } });
@@ -45,12 +46,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    const organizationId = user.organizationId as string | null;
-    const sessionDepartmentId = user.departmentId as string | null;
-    if (!organizationId) return NextResponse.json({ error: 'No organization' }, { status: 400 });
+    const context = await getTenantContext();
+    if (!context) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!hasPermission(context, 'threats.create')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const body = await req.json();
     const { threatId, title, type, severity, status, description, affectedAssets, source, indicators, mitreTactic, mitreTechnique, cvssScore, departmentId } = body ?? {};
@@ -58,13 +58,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Required fields: threatId, title, type, severity' }, { status: 400 });
     }
 
-    const targetDepartmentId = user.role === 'ADMIN' ? (departmentId || null) : sessionDepartmentId;
+    const targetDepartmentId = canAssignDepartment(context)
+      ? departmentId || null
+      : context.departmentId;
+
     if (targetDepartmentId) {
       const validDepartment = await prisma.department.findFirst({
-        where: { id: targetDepartmentId, organizationId },
+        where: { id: targetDepartmentId, organizationId: context.organizationId },
         select: { id: true },
       });
-      if (!validDepartment) return NextResponse.json({ error: 'Invalid department' }, { status: 400 });
+      if (!validDepartment) {
+        return NextResponse.json({ error: 'Invalid department' }, { status: 400 });
+      }
+    }
+
+    const parsedCvss = cvssScore === null || cvssScore === undefined || cvssScore === ''
+      ? null
+      : Number(cvssScore);
+    if (parsedCvss !== null && !Number.isFinite(parsedCvss)) {
+      return NextResponse.json({ error: 'Invalid CVSS score' }, { status: 400 });
     }
 
     const threat = await prisma.threat.create({
@@ -80,8 +92,8 @@ export async function POST(req: NextRequest) {
         indicators: indicators || null,
         mitreTactic: mitreTactic || null,
         mitreTechnique: mitreTechnique || null,
-        cvssScore: cvssScore ? parseFloat(cvssScore) : null,
-        organizationId,
+        cvssScore: parsedCvss,
+        organizationId: context.organizationId,
         departmentId: targetDepartmentId,
       },
     });
