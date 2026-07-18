@@ -18,7 +18,10 @@ export const authOptions: NextAuthOptions = {
         try {
           const user = await prisma.user.findUnique({
             where: { email: credentials.email },
-            include: { organization: true },
+            include: {
+              organization: { include: { parentOrganization: true } },
+              department: true,
+            },
           });
           if (!user) return null;
           const isValid = await bcrypt.compare(credentials.password, user.password);
@@ -29,7 +32,11 @@ export const authOptions: NextAuthOptions = {
             name: user.name,
             role: user.role,
             organizationId: user.organizationId,
-            organizationName: user?.organization?.name ?? null,
+            organizationName: user.organization?.name ?? null,
+            departmentId: user.departmentId,
+            departmentName: user.department?.name ?? null,
+            parentOrganizationId: user.organization?.parentOrganizationId ?? null,
+            parentOrganizationName: user.organization?.parentOrganization?.name ?? null,
           } as any;
         } catch {
           return null;
@@ -44,6 +51,10 @@ export const authOptions: NextAuthOptions = {
         token.role = user.role;
         token.organizationId = user.organizationId;
         token.organizationName = user.organizationName;
+        token.departmentId = user.departmentId;
+        token.departmentName = user.departmentName;
+        token.parentOrganizationId = user.parentOrganizationId;
+        token.parentOrganizationName = user.parentOrganizationName;
       }
       return token;
     },
@@ -53,11 +64,13 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).role = token.role;
         (session.user as any).organizationId = token.organizationId;
         (session.user as any).organizationName = token.organizationName;
+        (session.user as any).departmentId = token.departmentId;
+        (session.user as any).departmentName = token.departmentName;
+        (session.user as any).parentOrganizationId = token.parentOrganizationId;
+        (session.user as any).parentOrganizationName = token.parentOrganizationName;
       }
       return session;
     },
   },
-  pages: {
-    signIn: '/login',
-  },
+  pages: { signIn: '/login' },
 };
