@@ -1,97 +1,176 @@
 export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
 
+const SECRET_KEY_PATTERN = /(secret|token|password|api[_-]?key|private[_-]?key)/i;
+
+type AdminSessionUser = {
+  role: string;
+  organizationId: string | null;
+};
+
+async function getOrganizationAdmin(): Promise<AdminSessionUser | null> {
+  const session = await getServerSession(authOptions);
+  const user = session?.user as AdminSessionUser | undefined;
+
+  if (!user || !['ADMIN', 'SUPERADMIN'].includes(user.role) || !user.organizationId) {
+    return null;
+  }
+
+  return user;
+}
+
+function parseConfig(configData: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(configData || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function redactSecrets(config: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(config).filter(([key]) => !SECRET_KEY_PATTERN.test(key)),
+  );
+}
+
+function mergeConfig(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+) {
+  const merged = { ...existing };
+
+  for (const [key, value] of Object.entries(incoming)) {
+    // Empty secret fields mean “leave the stored credential unchanged”.
+    if (SECRET_KEY_PATTERN.test(key) && (value === '' || value === null || value === undefined)) {
+      continue;
+    }
+    merged[key] = value;
+  }
+
+  return merged;
+}
+
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-    const orgId = user.organizationId;
-    if (!orgId) return NextResponse.json({ error: 'No organization' }, { status: 400 });
+    const user = await getOrganizationAdmin();
+    if (!user) return NextResponse.json({ error: 'Admin access with an organization is required' }, { status: 403 });
 
     const configs = await prisma.integrationConfig.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId: user.organizationId! },
       select: { integrationId: true, enabled: true, configData: true, updatedAt: true },
     });
-    return NextResponse.json({ configs });
-  } catch (err: any) {
-    console.error('Get integrations error:', err);
+
+    return NextResponse.json({
+      configs: configs.map((config) => {
+        const parsed = parseConfig(config.configData);
+        const configuredSecretKeys = Object.keys(parsed).filter((key) => SECRET_KEY_PATTERN.test(key));
+
+        return {
+          integrationId: config.integrationId,
+          enabled: config.enabled,
+          configData: JSON.stringify(redactSecrets(parsed)),
+          configuredSecretKeys,
+          updatedAt: config.updatedAt,
+        };
+      }),
+    });
+  } catch (error: unknown) {
+    console.error('[INTEGRATIONS_GET_ERROR]', error);
     return NextResponse.json({ error: 'Failed to load integrations' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-    const orgId = user.organizationId;
-    if (!orgId) return NextResponse.json({ error: 'No organization' }, { status: 400 });
+    const user = await getOrganizationAdmin();
+    if (!user) return NextResponse.json({ error: 'Admin access with an organization is required' }, { status: 403 });
 
     const body = await req.json();
-    const { integrationId, config, enabled } = body;
+    const { integrationId, config, enabled } = body ?? {};
     if (!integrationId) {
       return NextResponse.json({ error: 'Missing integrationId' }, { status: 400 });
     }
 
-    const configJson = config ? JSON.stringify(config) : '{}';
+    if (config !== undefined && (!config || typeof config !== 'object' || Array.isArray(config))) {
+      return NextResponse.json({ error: 'Config must be an object' }, { status: 400 });
+    }
+
+    const existing = await prisma.integrationConfig.findUnique({
+      where: {
+        organizationId_integrationId: {
+          organizationId: user.organizationId!,
+          integrationId,
+        },
+      },
+      select: { configData: true },
+    });
+
+    const mergedConfig = config !== undefined
+      ? mergeConfig(parseConfig(existing?.configData ?? '{}'), config)
+      : parseConfig(existing?.configData ?? '{}');
     const isEnabled = typeof enabled === 'boolean' ? enabled : true;
 
     const saved = await prisma.integrationConfig.upsert({
       where: {
-        organizationId_integrationId: { organizationId: orgId, integrationId },
+        organizationId_integrationId: {
+          organizationId: user.organizationId!,
+          integrationId,
+        },
       },
       update: {
-        ...(config ? { configData: configJson } : {}),
+        ...(config !== undefined ? { configData: JSON.stringify(mergedConfig) } : {}),
         enabled: isEnabled,
       },
-      create: { organizationId: orgId, integrationId, configData: configJson, enabled: isEnabled },
+      create: {
+        organizationId: user.organizationId!,
+        integrationId,
+        configData: JSON.stringify(mergedConfig),
+        enabled: isEnabled,
+      },
     });
 
     return NextResponse.json({ success: true, id: saved.id, enabled: saved.enabled });
-  } catch (err: any) {
-    console.error('Save integration error:', err);
-    return NextResponse.json({ error: 'Failed to save' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('[INTEGRATIONS_POST_ERROR]', error);
+    return NextResponse.json({ error: 'Failed to save integration' }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-    const orgId = user.organizationId;
-    if (!orgId) return NextResponse.json({ error: 'No organization' }, { status: 400 });
+    const user = await getOrganizationAdmin();
+    if (!user) return NextResponse.json({ error: 'Admin access with an organization is required' }, { status: 403 });
 
     const body = await req.json();
-    const { integrationId, enabled } = body;
+    const { integrationId, enabled } = body ?? {};
     if (!integrationId || typeof enabled !== 'boolean') {
       return NextResponse.json({ error: 'Missing integrationId or enabled flag' }, { status: 400 });
     }
 
     const saved = await prisma.integrationConfig.upsert({
       where: {
-        organizationId_integrationId: { organizationId: orgId, integrationId },
+        organizationId_integrationId: {
+          organizationId: user.organizationId!,
+          integrationId,
+        },
       },
       update: { enabled },
-      create: { organizationId: orgId, integrationId, configData: '{}', enabled },
+      create: {
+        organizationId: user.organizationId!,
+        integrationId,
+        configData: '{}',
+        enabled,
+      },
     });
 
     return NextResponse.json({ success: true, enabled: saved.enabled });
-  } catch (err: any) {
-    console.error('Toggle integration error:', err);
-    return NextResponse.json({ error: 'Failed to toggle' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('[INTEGRATIONS_PATCH_ERROR]', error);
+    return NextResponse.json({ error: 'Failed to toggle integration' }, { status: 500 });
   }
 }
