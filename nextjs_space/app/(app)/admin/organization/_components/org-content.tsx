@@ -41,7 +41,6 @@ export default function OrgContent() {
   const [saving, setSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newSlug, setNewSlug] = useState('');
   const [creating, setCreating] = useState(false);
 
   const fetchOrganizations = async () => {
@@ -109,8 +108,8 @@ export default function OrgContent() {
 
   const handleCreateOrganization = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!newName.trim() || !newSlug.trim()) {
-      toast.error('Name and slug are required');
+    if (!newName.trim()) {
+      toast.error('Organization name is required');
       return;
     }
 
@@ -122,7 +121,6 @@ export default function OrgContent() {
         body: JSON.stringify({
           action: 'createOrg',
           name: newName.trim(),
-          slug: newSlug.trim().toLowerCase(),
         }),
       });
 
@@ -134,10 +132,10 @@ export default function OrgContent() {
       const data = await response.json();
       setOrganizations((current) => [...current, data.organization].sort((a, b) => a.name.localeCompare(b.name)));
       setNewName('');
-      setNewSlug('');
       setCreateOpen(false);
       toast.success('Organization created');
-    } catch {
+    } catch (error) {
+      console.error('Create organization error:', error);
       toast.error('Failed to create organization');
     } finally {
       setCreating(false);
@@ -168,7 +166,9 @@ export default function OrgContent() {
                 <form onSubmit={handleCreateOrganization}>
                   <DialogHeader>
                     <DialogTitle>Create Organization</DialogTitle>
-                    <DialogDescription>Create a tenant before assigning users and threat data.</DialogDescription>
+                    <DialogDescription>
+                      Enter the organization name. ThreatPulse will generate its internal identifier automatically.
+                    </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
@@ -176,27 +176,12 @@ export default function OrgContent() {
                       <Input
                         id="org-name"
                         value={newName}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setNewName(value);
-                          if (!newSlug) {
-                            setNewSlug(value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
-                          }
-                        }}
+                        onChange={(event) => setNewName(event.target.value)}
                         placeholder="Acme Security"
+                        maxLength={120}
+                        autoFocus
                         required
                       />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="org-slug">Slug</Label>
-                      <Input
-                        id="org-slug"
-                        value={newSlug}
-                        onChange={(event) => setNewSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                        placeholder="acme-security"
-                        required
-                      />
-                      <p className="text-xs text-muted-foreground">Lowercase letters, numbers, and hyphens only.</p>
                     </div>
                   </div>
                   <DialogFooter>
