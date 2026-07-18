@@ -20,6 +20,34 @@ async function getAdminUser(): Promise<AdminSessionUser | null> {
   return user;
 }
 
+function slugifyOrganizationName(name: string): string {
+  const slug = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '');
+
+  return slug || 'organization';
+}
+
+async function generateUniqueSlug(name: string): Promise<string> {
+  const baseSlug = slugifyOrganizationName(name);
+  let candidate = baseSlug;
+  let suffix = 2;
+
+  while (await prisma.organization.findUnique({ where: { slug: candidate }, select: { id: true } })) {
+    const suffixText = `-${suffix}`;
+    candidate = `${baseSlug.slice(0, 64 - suffixText.length).replace(/-+$/g, '')}${suffixText}`;
+    suffix += 1;
+  }
+
+  return candidate;
+}
+
 export async function GET() {
   try {
     const admin = await getAdminUser();
@@ -58,33 +86,25 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { action, name, slug, userId, orgId } = body ?? {};
+    const { action, name, userId, orgId } = body ?? {};
 
     if (action === 'createOrg') {
       if (admin.role !== 'SUPERADMIN') {
         return NextResponse.json({ error: 'Super administrator access required' }, { status: 403 });
       }
 
-      const normalizedName = name?.trim();
-      const normalizedSlug = slug?.trim().toLowerCase();
-      if (!normalizedName || !normalizedSlug) {
-        return NextResponse.json({ error: 'Name and slug are required' }, { status: 400 });
+      const normalizedName = typeof name === 'string' ? name.trim() : '';
+      if (!normalizedName) {
+        return NextResponse.json({ error: 'Organization name is required' }, { status: 400 });
       }
 
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug)) {
-        return NextResponse.json({ error: 'Slug must contain lowercase letters, numbers, and hyphens only' }, { status: 400 });
+      if (normalizedName.length > 120) {
+        return NextResponse.json({ error: 'Organization name must be 120 characters or fewer' }, { status: 400 });
       }
 
-      const existing = await prisma.organization.findUnique({
-        where: { slug: normalizedSlug },
-        select: { id: true },
-      });
-      if (existing) {
-        return NextResponse.json({ error: 'Organization slug already exists' }, { status: 409 });
-      }
-
+      const slug = await generateUniqueSlug(normalizedName);
       const organization = await prisma.organization.create({
-        data: { name: normalizedName, slug: normalizedSlug },
+        data: { name: normalizedName, slug },
         select: {
           id: true,
           name: true,
