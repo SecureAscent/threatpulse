@@ -40,14 +40,11 @@ async function uniqueParentSlug(name: string) {
   return candidate;
 }
 
-async function uniqueOrganizationSlug(parentOrganizationId: string | null, name: string) {
+async function uniqueOrganizationSlug(name: string) {
   const base = slugify(name, 'organization');
   let candidate = base;
   let suffix = 2;
-  while (await prisma.organization.findFirst({
-    where: { parentOrganizationId, slug: candidate },
-    select: { id: true },
-  })) {
+  while (await prisma.organization.findUnique({ where: { slug: candidate }, select: { id: true } })) {
     const tail = `-${suffix++}`;
     candidate = `${base.slice(0, 64 - tail.length).replace(/-+$/g, '')}${tail}`;
   }
@@ -125,10 +122,13 @@ export async function GET() {
         },
         orderBy: { name: 'asc' },
       });
-      return NextResponse.json({ parents, unassignedOrganizations });
+      const organizations = [...parents.flatMap((parent) => parent.organizations), ...unassignedOrganizations];
+      return NextResponse.json({ parents, unassignedOrganizations, organizations });
     }
 
-    if (!admin.organizationId) return NextResponse.json({ parents: [], unassignedOrganizations: [] });
+    if (!admin.organizationId) {
+      return NextResponse.json({ parents: [], unassignedOrganizations: [], organizations: [] });
+    }
     const organization = await prisma.organization.findUnique({
       where: { id: admin.organizationId },
       select: {
@@ -150,7 +150,7 @@ export async function GET() {
         _count: { select: { users: true, threats: true, departments: true } },
       },
     });
-    return NextResponse.json({ organization });
+    return NextResponse.json({ organization, organizations: organization ? [organization] : [] });
   } catch (error) {
     console.error('[ORGS_GET_ERROR]', error);
     return NextResponse.json({ error: 'Failed to load organization hierarchy' }, { status: 500 });
@@ -185,7 +185,7 @@ export async function POST(request: Request) {
       const organization = await prisma.organization.create({
         data: {
           name: normalizedName,
-          slug: await uniqueOrganizationSlug(parentOrganizationId, normalizedName),
+          slug: await uniqueOrganizationSlug(normalizedName),
           parentOrganizationId,
           departments: { create: { name: 'General', slug: 'general' } },
         },
