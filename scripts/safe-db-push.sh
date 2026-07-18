@@ -4,19 +4,34 @@ set -eu
 COMPOSE="docker compose --env-file .env.prod -f docker-compose.prod.yml"
 DB_USER="${POSTGRES_USER:-threatpulse}"
 DB_NAME="${POSTGRES_DB:-threatpulse}"
-MIGRATION_APP_NAME="threatpulse-schema-migration"
 BACKUP_DIR="backups"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/pre_schema_${TIMESTAMP}.sql.gz"
 SERVICES_STOPPED=0
+WATCHDOG_PID=""
 
-cleanup_migration_sessions() {
+terminate_schema_sessions() {
   $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
     SELECT pg_terminate_backend(pid)
     FROM pg_stat_activity
     WHERE datname = current_database()
-      AND application_name = '${MIGRATION_APP_NAME}'
-      AND pid <> pg_backend_pid();
+      AND pid <> pg_backend_pid()
+      AND usename = '${DB_USER}'
+      AND (
+        query ILIKE 'CREATE INDEX%'
+        OR query ILIKE 'ALTER TABLE%'
+        OR query ILIKE 'CREATE TABLE%'
+        OR query ILIKE 'DROP INDEX%'
+        OR query ILIKE '%prisma%'
+      );
+  " >/dev/null 2>&1 || true
+}
+
+reset_role_timeouts() {
+  $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+    ALTER ROLE \"${DB_USER}\" RESET lock_timeout;
+    ALTER ROLE \"${DB_USER}\" RESET statement_timeout;
+    ALTER ROLE \"${DB_USER}\" RESET idle_in_transaction_session_timeout;
   " >/dev/null 2>&1 || true
 }
 
@@ -30,7 +45,11 @@ restart_services() {
 on_exit() {
   status=$?
   trap - EXIT INT TERM HUP
-  cleanup_migration_sessions
+  if [ -n "$WATCHDOG_PID" ]; then
+    kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
+  fi
+  terminate_schema_sessions
+  reset_role_timeouts
   restart_services
   exit "$status"
 }
@@ -49,7 +68,6 @@ echo "==> Stopping database writers"
 $COMPOSE stop app collector
 SERVICES_STOPPED=1
 
-# Remove sessions left behind by stopped services or interrupted prior migrations.
 echo "==> Terminating stale ThreatPulse database sessions"
 $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
   SELECT pg_terminate_backend(pid)
@@ -75,13 +93,26 @@ if [ "$DUPLICATES" != "0" ]; then
   exit 1
 fi
 
-echo "==> Applying Prisma schema with lock and execution timeouts"
-# timeout prevents an interrupted docker client from leaving DDL running forever.
-# PGOPTIONS makes lock waits fail quickly and caps the total statement runtime.
-timeout --foreground 20m \
+echo "==> Enforcing database-side migration timeouts"
+$COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  ALTER ROLE \"${DB_USER}\" SET lock_timeout = '15s';
+  ALTER ROLE \"${DB_USER}\" SET statement_timeout = '15min';
+  ALTER ROLE \"${DB_USER}\" SET idle_in_transaction_session_timeout = '60s';
+"
+
+# Independent database watchdog. It remains effective even if Docker Compose or
+# Prisma loses its client connection and leaves a PostgreSQL DDL backend behind.
+(
+  sleep 1200
+  echo "ERROR: Migration watchdog reached 20 minutes; terminating schema sessions." >&2
+  terminate_schema_sessions
+) &
+WATCHDOG_PID=$!
+
+echo "==> Applying Prisma schema"
+timeout --foreground --kill-after=30s 20m \
   $COMPOSE run --rm \
   --entrypoint sh \
-  -e PGOPTIONS="-c application_name=${MIGRATION_APP_NAME} -c lock_timeout=15s -c statement_timeout=15min -c idle_in_transaction_session_timeout=60s" \
   app \
   -c 'cd /app/prisma-tools && ./node_modules/.bin/prisma db push --schema=/app/prisma-tools/prisma/schema.prisma --skip-generate --accept-data-loss'
 
