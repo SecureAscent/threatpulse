@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { writeAuditEvent } from '@/lib/audit';
 import {
   buildThreatScope,
   canAssignDepartment,
@@ -97,6 +98,16 @@ export async function POST(req: NextRequest) {
         departmentId: targetDepartmentId,
       },
     });
+
+    await writeAuditEvent({
+      context,
+      action: 'threat.created',
+      entityType: 'Threat',
+      entityId: threat.id,
+      departmentId: threat.departmentId,
+      metadata: { threatId: threat.threatId, severity: threat.severity, type: threat.type },
+    });
+
     return NextResponse.json({ threat }, { status: 201 });
   } catch (error: any) {
     console.error('POST threat error:', error);
