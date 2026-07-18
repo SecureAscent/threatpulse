@@ -5,13 +5,11 @@ echo "=============================================="
 echo "       ThreatPulse Intel -- Starting          "
 echo "=============================================="
 
-# Extract host and port from DATABASE_URL
 DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:/]*\).*|\1|p')
 DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
 DB_HOST=${DB_HOST:-db}
 DB_PORT=${DB_PORT:-5432}
 
-# Wait for PostgreSQL to be ready using simple TCP check (no extra modules needed)
 echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
 RETRIES=30
 until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
@@ -25,7 +23,6 @@ until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
 done
 echo "Database is ready"
 
-# Run Prisma schema push (creates/updates tables)
 echo "Pushing database schema..."
 cd /app/prisma-tools
 npx prisma db push --schema=./prisma/schema.prisma --skip-generate 2>&1 || {
@@ -34,7 +31,12 @@ npx prisma db push --schema=./prisma/schema.prisma --skip-generate 2>&1 || {
 }
 echo "Database schema is up to date"
 
-# Seed the database (only if no users exist yet)
+if [ -f /app/prisma-tools/scripts/migrate-hierarchy.ts ]; then
+  echo "Applying organization hierarchy migration..."
+  NODE_PATH=/app/prisma-tools/node_modules npx tsx scripts/migrate-hierarchy.ts 2>&1
+  echo "Organization hierarchy migration complete"
+fi
+
 echo "Checking if seed data exists..."
 SEED_CHECK=$(cd /app/prisma-tools && NODE_PATH=/app/prisma-tools/node_modules node -e "
 const { PrismaClient } = require('.prisma/client');
@@ -55,7 +57,6 @@ else
   echo "Database already has $SEED_CHECK user(s), skipping seed"
 fi
 
-# Start the Next.js server
 echo ""
 echo "Starting ThreatPulse Intel on port ${PORT:-3000}"
 echo "   URL: ${NEXTAUTH_URL:-http://localhost:3000}"
