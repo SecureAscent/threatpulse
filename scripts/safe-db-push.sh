@@ -165,28 +165,30 @@ fi
 
 echo "==> Deferred $DEFERRED_INDEX_COUNT index statements from the core transaction"
 
-# Drain once more immediately before applying SQL, then acquire an ACCESS
-# EXCLUSIVE lock inside the same transaction so core table and constraint changes
-# have a stable view. No CREATE INDEX statement is permitted in this file.
-echo "==> Draining database sessions immediately before schema lock"
-terminate_all_application_sessions
+# Prisma emits comments and blank lines even when there is no core DDL. Strip those
+# before deciding whether an ACCESS EXCLUSIVE lock and transactional apply are needed.
+CORE_STATEMENT_COUNT="$(grep -Ev '^[[:space:]]*(--.*)?$' "$CORE_DIFF_FILE" | wc -l | tr -d ' ')"
 
-{
-  printf '%s\n' 'LOCK TABLE "Threat" IN ACCESS EXCLUSIVE MODE;'
-  cat "$CORE_DIFF_FILE"
-} > "$LOCKED_CORE_DIFF_FILE"
+if [ "$CORE_STATEMENT_COUNT" -gt 0 ]; then
+  # Drain once more immediately before applying SQL, then acquire an ACCESS
+  # EXCLUSIVE lock inside the same transaction so core table and constraint changes
+  # have a stable view. No CREATE INDEX statement is permitted in this file.
+  echo "==> Draining database sessions immediately before schema lock"
+  terminate_all_application_sessions
 
-echo "==> Applying core schema SQL transactionally: $LOCKED_CORE_DIFF_FILE"
-$COMPOSE exec -T postgres \
-  psql -X -1 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-  < "$LOCKED_CORE_DIFF_FILE"
+  {
+    printf '%s\n' 'LOCK TABLE "Threat" IN ACCESS EXCLUSIVE MODE;'
+    cat "$CORE_DIFF_FILE"
+  } > "$LOCKED_CORE_DIFF_FILE"
 
-# Clean up any dead or aborted tuples left by previously terminated writers before
-# PostgreSQL scans Threat to build its new tenant-uniqueness index.
-echo "==> Vacuuming Threat before deferred index creation"
-$COMPOSE exec -T postgres \
-  psql -X -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-  -c 'VACUUM (ANALYZE, FREEZE) "Threat";'
+  echo "==> Applying core schema SQL transactionally: $LOCKED_CORE_DIFF_FILE"
+  $COMPOSE exec -T postgres \
+    psql -X -1 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+    < "$LOCKED_CORE_DIFF_FILE"
+else
+  rm -f "$LOCKED_CORE_DIFF_FILE"
+  echo "==> No core schema changes; skipping table lock and transactional apply"
+fi
 
 if [ -s "$DEFERRED_INDEX_FILE" ]; then
   echo "==> Applying all deferred indexes concurrently: $DEFERRED_INDEX_FILE"
