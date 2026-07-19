@@ -122,10 +122,11 @@ $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c
 ) &
 WATCHDOG_PID=$!
 
-# Generate the exact SQL Prisma wants for the live database. We deliberately
-# defer only ordinary secondary indexes because CREATE INDEX is the operation
-# that is blocking this production database. CREATE UNIQUE INDEX statements,
-# table changes, foreign keys, and constraints remain in the core migration.
+# Generate the exact SQL Prisma wants for the live database. Table changes,
+# foreign keys, and constraints are applied in one transaction. Ordinary indexes
+# and the Threat tenant-uniqueness index are moved to a separate non-transactional
+# phase and built with CONCURRENTLY. PostgreSQL does not permit CREATE INDEX
+# CONCURRENTLY inside a transaction block.
 echo "==> Generating Prisma schema diff: $RAW_DIFF_FILE"
 $COMPOSE run --rm -T --no-deps \
   --entrypoint sh \
@@ -133,19 +134,34 @@ $COMPOSE run --rm -T --no-deps \
   -c 'cd /app/prisma-tools && ./node_modules/.bin/prisma migrate diff --from-schema-datasource /app/prisma-tools/prisma/schema.prisma --to-schema-datamodel /app/prisma-tools/prisma/schema.prisma --script' \
   > "$RAW_DIFF_FILE"
 
-awk '/^CREATE INDEX / { print > deferred; next } { print }' \
-  deferred="$DEFERRED_INDEX_FILE" \
-  "$RAW_DIFF_FILE" > "$CORE_DIFF_FILE"
+: > "$DEFERRED_INDEX_FILE"
+awk '
+  /^CREATE INDEX / {
+    sub(/^CREATE INDEX /, "CREATE INDEX CONCURRENTLY ")
+    print > deferred
+    next
+  }
+  /^CREATE UNIQUE INDEX "Threat_organizationId_threatId_key" / {
+    sub(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX CONCURRENTLY ")
+    print > deferred
+    next
+  }
+  { print }
+' deferred="$DEFERRED_INDEX_FILE" "$RAW_DIFF_FILE" > "$CORE_DIFF_FILE"
 
 if grep -Eq '^CREATE INDEX ' "$CORE_DIFF_FILE"; then
   echo "ERROR: A non-unique CREATE INDEX statement remained in the core migration." >&2
   exit 1
 fi
 
+if grep -Eq '^CREATE UNIQUE INDEX "Threat_organizationId_threatId_key" ' "$CORE_DIFF_FILE"; then
+  echo "ERROR: Threat tenant unique index remained in the core migration." >&2
+  exit 1
+fi
+
 # The earlier session drain occurs before Prisma diff generation. Drain once more
 # immediately before applying SQL, then acquire an ACCESS EXCLUSIVE lock inside
-# the same transaction. This removes the race where a collector or external
-# process inserts into Threat between the first drain and unique-index creation.
+# the same transaction so core table and constraint changes have a stable view.
 echo "==> Draining database sessions immediately before schema lock"
 terminate_all_application_sessions
 
@@ -160,10 +176,14 @@ $COMPOSE exec -T postgres \
   < "$LOCKED_CORE_DIFF_FILE"
 
 if [ -s "$DEFERRED_INDEX_FILE" ]; then
-  echo "==> Deferred non-unique indexes saved to: $DEFERRED_INDEX_FILE"
+  echo "==> Applying deferred indexes concurrently: $DEFERRED_INDEX_FILE"
+  # Do not add -1 here: CREATE INDEX CONCURRENTLY must run outside a transaction.
+  $COMPOSE exec -T postgres \
+    psql -X -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+    < "$DEFERRED_INDEX_FILE"
 else
   rm -f "$DEFERRED_INDEX_FILE"
-  echo "==> No non-unique indexes required deferral"
+  echo "==> No indexes required deferral"
 fi
 
-echo "==> Core schema deployment completed successfully"
+echo "==> Schema and deferred index deployment completed successfully"
