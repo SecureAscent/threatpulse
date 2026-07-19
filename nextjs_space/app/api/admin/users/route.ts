@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { canManageRole, hasPermission, isAppRole } from '@/lib/rbac';
 
 const MANAGEABLE_ROLES = ['ADMIN', 'ANALYST'] as const;
 
@@ -15,7 +16,7 @@ type AdminSessionUser = {
 async function getAdminUser(): Promise<AdminSessionUser | null> {
   const session = await getServerSession(authOptions);
   const user = session?.user as AdminSessionUser | undefined;
-  if (!user || !['ADMIN', 'SUPERADMIN'].includes(user.role)) return null;
+  if (!user || !hasPermission(user.role, 'users.manage')) return null;
   return user;
 }
 
@@ -43,6 +44,10 @@ async function validateDepartment(organizationId: string, departmentId?: string 
   }));
 }
 
+function isManageableRole(role: unknown): role is (typeof MANAGEABLE_ROLES)[number] {
+  return isAppRole(role) && MANAGEABLE_ROLES.includes(role as (typeof MANAGEABLE_ROLES)[number]);
+}
+
 export async function GET() {
   try {
     const admin = await getAdminUser();
@@ -50,7 +55,9 @@ export async function GET() {
     if (admin.role !== 'SUPERADMIN' && !admin.organizationId) return NextResponse.json({ users: [] });
 
     const users = await prisma.user.findMany({
-      where: admin.role === 'SUPERADMIN' ? undefined : { organizationId: admin.organizationId },
+      where: admin.role === 'SUPERADMIN'
+        ? undefined
+        : { organizationId: admin.organizationId, role: 'ANALYST' },
       select: userSelect,
       orderBy: { createdAt: 'desc' },
     });
@@ -71,8 +78,11 @@ export async function POST(req: Request) {
     if (!name?.trim() || !email?.trim() || !password) {
       return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
     }
-    if (!MANAGEABLE_ROLES.includes(role)) {
+    if (!isManageableRole(role)) {
       return NextResponse.json({ message: 'Invalid role' }, { status: 400 });
+    }
+    if (!canManageRole(admin.role, role)) {
+      return NextResponse.json({ message: 'You cannot create a user with that role' }, { status: 403 });
     }
 
     const targetOrganizationId = admin.role === 'SUPERADMIN' ? organizationId : admin.organizationId;
@@ -117,7 +127,7 @@ export async function PATCH(req: Request) {
     if (!userId || (!role && organizationId === undefined && departmentId === undefined)) {
       return NextResponse.json({ message: 'No changes supplied' }, { status: 400 });
     }
-    if (role && !MANAGEABLE_ROLES.includes(role)) {
+    if (role && !isManageableRole(role)) {
       return NextResponse.json({ message: 'Invalid role' }, { status: 400 });
     }
 
@@ -126,8 +136,11 @@ export async function PATCH(req: Request) {
       select: { id: true, role: true, organizationId: true },
     });
     if (!target) return NextResponse.json({ message: 'User not found' }, { status: 404 });
-    if (target.role === 'SUPERADMIN' && admin.role !== 'SUPERADMIN') {
-      return NextResponse.json({ message: 'Cannot modify a super administrator' }, { status: 403 });
+    if (!canManageRole(admin.role, target.role)) {
+      return NextResponse.json({ message: 'You cannot modify a user with that role' }, { status: 403 });
+    }
+    if (role && !canManageRole(admin.role, role)) {
+      return NextResponse.json({ message: 'You cannot assign that role' }, { status: 403 });
     }
     if (organizationId !== undefined && admin.role !== 'SUPERADMIN') {
       return NextResponse.json({ message: 'Only super administrators can move users between organizations' }, { status: 403 });
@@ -173,9 +186,10 @@ export async function DELETE(req: Request) {
       select: { id: true, role: true },
     });
     if (!target) return NextResponse.json({ message: 'User not found' }, { status: 404 });
-    if (target.role === 'SUPERADMIN' && admin.role !== 'SUPERADMIN') {
-      return NextResponse.json({ message: 'Cannot delete a super administrator' }, { status: 403 });
+    if (!canManageRole(admin.role, target.role)) {
+      return NextResponse.json({ message: 'You cannot delete a user with that role' }, { status: 403 });
     }
+
     await prisma.user.delete({ where: { id: userId } });
     return NextResponse.json({ message: 'User deleted successfully' });
   } catch (error) {
