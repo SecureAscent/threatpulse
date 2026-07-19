@@ -22,6 +22,9 @@ model Organization {
   parentOrganizationId String?
   name                 String
   slug                 String              @unique
+  description          String?
+  timezone             String              @default("UTC")
+  archivedAt           DateTime?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   parentOrganization   ParentOrganization? @relation(fields: [parentOrganizationId], references: [id])
@@ -39,6 +42,7 @@ model Organization {
   identityMappings     ExternalIdentityMapping[]
 
   @@index([parentOrganizationId])
+  @@index([archivedAt])
 }
 
 model Department {
