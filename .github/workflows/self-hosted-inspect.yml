@@ -19,7 +19,7 @@ concurrency:
 jobs:
   inspect:
     name: Inspect ThreatPulse Docker host
-    runs-on: [self-hosted, threatpulse, docker]
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 10
 
     steps:
