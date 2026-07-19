@@ -1,14 +1,13 @@
 import type { Prisma } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import {
+  hasPermission as roleHasPermission,
+  normalizeAppRole,
+  type AppRole,
+} from '@/lib/rbac';
 
-export type TenantRole =
-  | 'SUPERADMIN'
-  | 'ADMIN'
-  | 'PARENT_ADMIN'
-  | 'DEPARTMENT_ADMIN'
-  | 'ANALYST'
-  | 'VIEWER';
+export type TenantRole = AppRole;
 
 export type TenantPermission =
   | 'threats.read'
@@ -27,52 +26,25 @@ export interface TenantContext {
   parentOrganizationId: string | null;
 }
 
-const ROLE_PERMISSIONS: Record<TenantRole, ReadonlySet<TenantPermission>> = {
-  SUPERADMIN: new Set([
-    'threats.read',
-    'threats.create',
-    'threats.update',
-    'threats.delete',
-    'organizations.manage',
-    'users.manage',
-    'integrations.manage',
-  ]),
-  ADMIN: new Set([
-    'threats.read',
-    'threats.create',
-    'threats.update',
-    'threats.delete',
-    'organizations.manage',
-    'users.manage',
-    'integrations.manage',
-  ]),
-  PARENT_ADMIN: new Set([
-    'threats.read',
-    'threats.create',
-    'threats.update',
-    'organizations.manage',
-    'users.manage',
-    'integrations.manage',
-  ]),
-  DEPARTMENT_ADMIN: new Set([
-    'threats.read',
-    'threats.create',
-    'threats.update',
-    'users.manage',
-  ]),
-  ANALYST: new Set(['threats.read', 'threats.create', 'threats.update']),
-  VIEWER: new Set(['threats.read']),
-};
+const TENANT_PERMISSION_MAP = {
+  'threats.read': 'threats.read',
+  'threats.create': 'threats.manage',
+  'threats.update': 'threats.manage',
+  'threats.delete': 'threats.manage',
+  'organizations.manage': 'organizations.manage',
+  'users.manage': 'users.manage',
+  'integrations.manage': 'integrations.manage',
+} as const;
 
 export async function getTenantContext(): Promise<TenantContext | null> {
   const session = await getServerSession(authOptions);
   const user = session?.user as any;
 
-  if (!user?.id || !user?.organizationId) return null;
+  if (!user?.id || !user?.organizationId || user?.accessRevoked) return null;
 
   return {
     userId: String(user.id),
-    role: normalizeRole(user.role),
+    role: normalizeAppRole(user.role),
     organizationId: String(user.organizationId),
     departmentId: user.departmentId ? String(user.departmentId) : null,
     parentOrganizationId: user.parentOrganizationId
@@ -85,7 +57,7 @@ export function hasPermission(
   context: TenantContext,
   permission: TenantPermission,
 ): boolean {
-  return ROLE_PERMISSIONS[context.role].has(permission);
+  return roleHasPermission(context.role, TENANT_PERMISSION_MAP[permission]);
 }
 
 export function buildThreatScope(
@@ -100,11 +72,9 @@ export function buildThreatScope(
 }
 
 export function canAssignDepartment(context: TenantContext): boolean {
-  return ['SUPERADMIN', 'ADMIN', 'PARENT_ADMIN'].includes(context.role);
+  return roleHasPermission(context.role, 'departments.manage');
 }
 
 export function normalizeRole(role: unknown): TenantRole {
-  const normalized = String(role || 'ANALYST').toUpperCase();
-  if (normalized in ROLE_PERMISSIONS) return normalized as TenantRole;
-  return 'ANALYST';
+  return normalizeAppRole(role);
 }
