@@ -1,27 +1,27 @@
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
+import { hasPermission } from '@/lib/rbac';
 
 export default withAuth(
   function middleware(req: any) {
     const { pathname } = req.nextUrl;
     const token = req.nextauth?.token;
-    const isAdminRole = token?.role === 'ADMIN' || token?.role === 'SUPERADMIN';
+    const role = token?.role;
 
-    // Admin-only routes
-    if (pathname.startsWith('/admin') && !isAdminRole) {
+    if (pathname.startsWith('/admin') && !hasPermission(role, 'users.manage')) {
       return NextResponse.redirect(new URL('/dashboard', req.url));
     }
-    if (pathname.startsWith('/integrations') && !isAdminRole) {
+    if (pathname.startsWith('/integrations') && !hasPermission(role, 'integrations.manage')) {
       return NextResponse.redirect(new URL('/dashboard', req.url));
     }
-    if (pathname.startsWith('/actioned-threats') && !isAdminRole) {
+    if (pathname.startsWith('/actioned-threats') && !hasPermission(role, 'threats.manage')) {
       return NextResponse.redirect(new URL('/dashboard', req.url));
     }
     return NextResponse.next();
   },
   {
     callbacks: {
-      authorized: ({ token }: any) => !!token,
+      authorized: ({ token }: any) => !!token && !token.accessRevoked,
     },
   }
 );
