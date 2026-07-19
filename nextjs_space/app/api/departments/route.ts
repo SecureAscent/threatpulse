@@ -8,6 +8,8 @@ import { managedDepartmentScope, validateDepartmentInput } from '@/lib/departmen
 import { organizationScope } from '@/lib/organization-admin';
 import { getTenantContext, hasPermission } from '@/lib/tenant-context';
 
+type DepartmentArchiveRow = { id: string; archivedAt: Date | null };
+
 export async function GET(request: NextRequest) {
   const context = await getTenantContext();
   if (!context) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -17,6 +19,7 @@ export async function GET(request: NextRequest) {
 
   const organizationId = String(request.nextUrl.searchParams.get('organizationId') || '').trim();
   const search = String(request.nextUrl.searchParams.get('search') || '').trim();
+  const includeArchived = request.nextUrl.searchParams.get('includeArchived') === 'true';
   const where: Prisma.DepartmentWhereInput = {
     AND: [
       managedDepartmentScope(context),
@@ -42,12 +45,24 @@ export async function GET(request: NextRequest) {
       slug: true,
       createdAt: true,
       updatedAt: true,
-      organization: { select: { id: true, name: true, slug: true } },
+      organization: { select: { id: true, name: true, slug: true, archivedAt: true } },
       _count: { select: { users: true, assets: true, threats: true } },
     },
   });
 
-  return NextResponse.json({ departments });
+  const archiveRows = departments.length
+    ? await prisma.$queryRaw<DepartmentArchiveRow[]>`
+        SELECT id, "archivedAt"
+        FROM "Department"
+        WHERE id IN (${Prisma.join(departments.map((department) => department.id))})
+      `
+    : [];
+  const archiveMap = new Map(archiveRows.map((row) => [row.id, row.archivedAt]));
+  const visibleDepartments = departments
+    .map((department) => ({ ...department, archivedAt: archiveMap.get(department.id) ?? null }))
+    .filter((department) => includeArchived || (!department.archivedAt && !department.organization.archivedAt));
+
+  return NextResponse.json({ departments: visibleDepartments });
 }
 
 export async function POST(request: NextRequest) {
@@ -94,7 +109,7 @@ export async function POST(request: NextRequest) {
       metadata: { organizationId, organizationName: organization.name, name: department.name, slug: department.slug },
     });
 
-    return NextResponse.json({ department }, { status: 201 });
+    return NextResponse.json({ department: { ...department, archivedAt: null } }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return NextResponse.json({ error: 'A department with that slug already exists in this organization.' }, { status: 409 });
