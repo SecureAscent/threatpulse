@@ -1,4 +1,11 @@
-export const ROLES = ['ANALYST', 'ADMIN', 'SUPERADMIN'] as const;
+export const ROLES = [
+  'VIEWER',
+  'ANALYST',
+  'DEPARTMENT_ADMIN',
+  'ADMIN',
+  'PARENT_ADMIN',
+  'SUPERADMIN',
+] as const;
 
 export type AppRole = (typeof ROLES)[number];
 
@@ -18,11 +25,36 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<AppRole, ReadonlySet<Permission>> = {
-  ANALYST: new Set<Permission>([
+  VIEWER: new Set<Permission>([
     'threats.read',
     'assets.read',
   ]),
+  ANALYST: new Set<Permission>([
+    'threats.read',
+    'threats.manage',
+    'assets.read',
+  ]),
+  DEPARTMENT_ADMIN: new Set<Permission>([
+    'threats.read',
+    'threats.manage',
+    'assets.read',
+    'assets.manage',
+    'users.manage',
+    'departments.manage',
+    'audit.read',
+  ]),
   ADMIN: new Set<Permission>([
+    'threats.read',
+    'threats.manage',
+    'assets.read',
+    'assets.manage',
+    'integrations.manage',
+    'users.manage',
+    'organizations.manage',
+    'departments.manage',
+    'audit.read',
+  ]),
+  PARENT_ADMIN: new Set<Permission>([
     'threats.read',
     'threats.manage',
     'assets.read',
@@ -37,11 +69,16 @@ const ROLE_PERMISSIONS: Record<AppRole, ReadonlySet<Permission>> = {
 };
 
 export function isAppRole(value: unknown): value is AppRole {
-  return typeof value === 'string' && ROLES.includes(value as AppRole);
+  return typeof value === 'string' && ROLES.includes(value.toUpperCase() as AppRole);
+}
+
+export function normalizeAppRole(value: unknown): AppRole {
+  const normalized = String(value || 'ANALYST').toUpperCase();
+  return isAppRole(normalized) ? normalized : 'ANALYST';
 }
 
 export function hasPermission(role: unknown, permission: Permission): boolean {
-  return isAppRole(role) && ROLE_PERMISSIONS[role].has(permission);
+  return ROLE_PERMISSIONS[normalizeAppRole(role)].has(permission);
 }
 
 export function hasAnyPermission(role: unknown, permissions: readonly Permission[]): boolean {
@@ -49,9 +86,14 @@ export function hasAnyPermission(role: unknown, permissions: readonly Permission
 }
 
 export function canManageRole(actorRole: unknown, targetRole: unknown): boolean {
-  if (!isAppRole(actorRole) || !isAppRole(targetRole)) return false;
-  if (actorRole === 'SUPERADMIN') return true;
-  return actorRole === 'ADMIN' && targetRole === 'ANALYST';
+  const actor = normalizeAppRole(actorRole);
+  const target = normalizeAppRole(targetRole);
+
+  if (actor === 'SUPERADMIN') return target !== 'SUPERADMIN';
+  if (actor === 'PARENT_ADMIN') return ['ADMIN', 'DEPARTMENT_ADMIN', 'ANALYST', 'VIEWER'].includes(target);
+  if (actor === 'ADMIN') return ['DEPARTMENT_ADMIN', 'ANALYST', 'VIEWER'].includes(target);
+  if (actor === 'DEPARTMENT_ADMIN') return ['ANALYST', 'VIEWER'].includes(target);
+  return false;
 }
 
 export function permissionsForRole(role: AppRole): readonly Permission[] {
@@ -59,7 +101,10 @@ export function permissionsForRole(role: AppRole): readonly Permission[] {
 }
 
 export const ROLE_DESCRIPTIONS: Record<AppRole, string> = {
-  ANALYST: 'Reviews tenant-scoped threats and assets without administrative access.',
+  VIEWER: 'Reads tenant-scoped threats and assets without modification rights.',
+  ANALYST: 'Reviews and triages tenant-scoped threats while viewing assigned assets.',
+  DEPARTMENT_ADMIN: 'Manages users, threats, assets, departments, and audit data within an assigned department.',
   ADMIN: 'Manages users, departments, integrations, threats, assets, and audit data within one organization.',
+  PARENT_ADMIN: 'Manages organizations and their administrative resources within one parent organization.',
   SUPERADMIN: 'Manages the entire platform and may operate across all organizations.',
 };
