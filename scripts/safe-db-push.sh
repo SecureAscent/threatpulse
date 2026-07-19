@@ -61,6 +61,11 @@ mkdir -p "$BACKUP_DIR"
 echo "==> Verifying PostgreSQL is available"
 $COMPOSE exec -T postgres pg_isready -U "$DB_USER" -d "$DB_NAME"
 
+# Prisma schema assets are baked into the production app image at build time.
+# Always rebuild before db push so migrations cannot run against a stale schema.
+echo "==> Rebuilding app image with current Prisma schema"
+$COMPOSE build app
+
 echo "==> Creating pre-migration backup: $BACKUP_FILE"
 $COMPOSE exec -T postgres pg_dump -U "$DB_USER" -d "$DB_NAME" | gzip > "$BACKUP_FILE"
 
