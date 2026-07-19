@@ -35,7 +35,16 @@ type SyncCounters = Omit<
   "syncRunId" | "status" | "cursorAfter"
 >;
 
-function json(value: Record<string, unknown> | undefined): Prisma.InputJsonValue | undefined {
+type SyncModel =
+  | "asset"
+  | "productVersion"
+  | "sbomDocument"
+  | "softwareComponent"
+  | "assetVulnerability";
+
+function json(
+  value: Record<string, unknown> | undefined,
+): Prisma.InputJsonValue | undefined {
   return value as Prisma.InputJsonValue | undefined;
 }
 
@@ -45,28 +54,67 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-async function recordExists(
-  prisma: PrismaClient,
-  model: "asset" | "productVersion" | "sbomDocument" | "softwareComponent" | "assetVulnerability",
+function uniqueWhere(
   organizationId: string,
   externalSource: string,
   externalId: string,
-): Promise<boolean> {
-  const where = {
+) {
+  return {
     organizationId_externalSource_externalId: {
       organizationId,
       externalSource,
       externalId,
     },
   };
+}
 
-  return Boolean(await prisma[model].findUnique({ where, select: { id: true } } as never));
+async function recordExists(
+  prisma: PrismaClient,
+  model: SyncModel,
+  organizationId: string,
+  externalSource: string,
+  externalId: string,
+): Promise<boolean> {
+  const where = uniqueWhere(organizationId, externalSource, externalId);
+
+  switch (model) {
+    case "asset":
+      return Boolean(
+        await prisma.asset.findUnique({ where, select: { id: true } }),
+      );
+    case "productVersion":
+      return Boolean(
+        await prisma.productVersion.findUnique({ where, select: { id: true } }),
+      );
+    case "sbomDocument":
+      return Boolean(
+        await prisma.sbomDocument.findUnique({ where, select: { id: true } }),
+      );
+    case "softwareComponent":
+      return Boolean(
+        await prisma.softwareComponent.findUnique({
+          where,
+          select: { id: true },
+        }),
+      );
+    case "assetVulnerability":
+      return Boolean(
+        await prisma.assetVulnerability.findUnique({
+          where,
+          select: { id: true },
+        }),
+      );
+  }
 }
 
 function countWrite(existed: boolean, counters: SyncCounters): void {
   counters.recordsRead += 1;
   if (existed) counters.recordsUpdated += 1;
   else counters.recordsCreated += 1;
+}
+
+function dryRunId(kind: string, externalId: string): string {
+  return `dry-run:${kind}:${externalId}`;
 }
 
 export async function syncAssetConnector(
@@ -83,7 +131,9 @@ export async function syncAssetConnector(
   });
 
   if (!integration) {
-    throw new Error("Integration configuration does not belong to this organization.");
+    throw new Error(
+      "Integration configuration does not belong to this organization.",
+    );
   }
 
   const context: ConnectorContext = {
@@ -131,59 +181,105 @@ export async function syncAssetConnector(
     for await (const page of request.connector.listAssets(context)) {
       throwIfAborted(request.signal);
       cursorAfter = page.nextCursor ?? cursorAfter;
-
       for (const source of page.records) {
-        await upsertAsset(prisma, request, source, assetIds, counters, now, mode);
+        await upsertAsset(
+          prisma,
+          request,
+          source,
+          assetIds,
+          counters,
+          now,
+          mode,
+        );
       }
     }
 
     for await (const page of request.connector.listProductVersions(context)) {
       throwIfAborted(request.signal);
       cursorAfter = page.nextCursor ?? cursorAfter;
-
       for (const source of page.records) {
         const assetId = assetIds.get(source.assetExternalId);
-        if (!assetId) throw new Error(`Missing asset for product version ${source.externalId}.`);
-        await upsertProductVersion(prisma, request, source, assetId, versionIds, counters, now, mode);
+        if (!assetId) {
+          throw new Error(
+            `Missing asset for product version ${source.externalId}.`,
+          );
+        }
+        await upsertProductVersion(
+          prisma,
+          request,
+          source,
+          assetId,
+          versionIds,
+          counters,
+          now,
+          mode,
+        );
       }
     }
 
     for await (const page of request.connector.listSboms(context)) {
       throwIfAborted(request.signal);
       cursorAfter = page.nextCursor ?? cursorAfter;
-
       for (const source of page.records) {
-        const productVersionId = versionIds.get(source.productVersionExternalId);
-        if (!productVersionId) throw new Error(`Missing product version for SBOM ${source.externalId}.`);
-        await upsertSbom(prisma, request, source, productVersionId, sbomIds, counters, now, mode);
+        const productVersionId = versionIds.get(
+          source.productVersionExternalId,
+        );
+        if (!productVersionId) {
+          throw new Error(`Missing product version for SBOM ${source.externalId}.`);
+        }
+        await upsertSbom(
+          prisma,
+          request,
+          source,
+          productVersionId,
+          sbomIds,
+          counters,
+          now,
+          mode,
+        );
       }
     }
 
     for await (const page of request.connector.listComponents(context)) {
       throwIfAborted(request.signal);
       cursorAfter = page.nextCursor ?? cursorAfter;
-
       for (const source of page.records) {
         const sbomDocumentId = sbomIds.get(source.sbomExternalId);
-        if (!sbomDocumentId) throw new Error(`Missing SBOM for component ${source.externalId}.`);
-        await upsertComponent(prisma, request, source, sbomDocumentId, componentIds, counters, now, mode);
+        if (!sbomDocumentId) {
+          throw new Error(`Missing SBOM for component ${source.externalId}.`);
+        }
+        await upsertComponent(
+          prisma,
+          request,
+          source,
+          sbomDocumentId,
+          componentIds,
+          counters,
+          now,
+          mode,
+        );
       }
     }
 
     for await (const page of request.connector.listVulnerabilities(context)) {
       throwIfAborted(request.signal);
       cursorAfter = page.nextCursor ?? cursorAfter;
-
       for (const source of page.records) {
         const assetId = assetIds.get(source.assetExternalId);
-        if (!assetId) throw new Error(`Missing asset for vulnerability ${source.externalId}.`);
+        if (!assetId) {
+          throw new Error(`Missing asset for vulnerability ${source.externalId}.`);
+        }
         await upsertVulnerability(
           prisma,
           request,
           source,
           assetId,
-          source.productVersionExternalId ? versionIds.get(source.productVersionExternalId) : undefined,
-          source.componentExternalId ? componentIds.get(source.componentExternalId) : undefined,
+          source.productVersionExternalId
+            ? versionIds.get(source.productVersionExternalId)
+            : undefined,
+          source.componentExternalId
+            ? componentIds.get(source.componentExternalId)
+            : undefined,
           counters,
           mode,
         );
@@ -200,10 +296,18 @@ export async function syncAssetConnector(
       },
     });
 
-    return { syncRunId: syncRun.id, status: "COMPLETED", cursorAfter, ...counters };
+    return {
+      syncRunId: syncRun.id,
+      status: "COMPLETED",
+      cursorAfter,
+      ...counters,
+    };
   } catch (error) {
     counters.recordsFailed += 1;
-    const message = error instanceof Error ? error.message : "Unknown synchronization failure.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown synchronization failure.";
 
     await prisma.externalSyncRun.update({
       where: { id: syncRun.id },
@@ -229,25 +333,36 @@ async function upsertAsset(
   now: Date,
   mode: SyncMode,
 ): Promise<void> {
-  const existed = await recordExists(prisma, "asset", request.organizationId, request.connector.id, source.externalId);
+  const existed = await recordExists(
+    prisma,
+    "asset",
+    request.organizationId,
+    request.connector.id,
+    source.externalId,
+  );
   countWrite(existed, counters);
-  if (mode === "DRY_RUN") return;
+
+  if (mode === "DRY_RUN") {
+    ids.set(source.externalId, dryRunId("asset", source.externalId));
+    return;
+  }
 
   const ownerUser = source.owner?.email
     ? await prisma.user.findFirst({
-        where: { organizationId: request.organizationId, email: source.owner.email },
+        where: {
+          organizationId: request.organizationId,
+          email: source.owner.email,
+        },
         select: { id: true },
       })
     : null;
 
   const asset = await prisma.asset.upsert({
-    where: {
-      organizationId_externalSource_externalId: {
-        organizationId: request.organizationId,
-        externalSource: request.connector.id,
-        externalId: source.externalId,
-      },
-    },
+    where: uniqueWhere(
+      request.organizationId,
+      request.connector.id,
+      source.externalId,
+    ),
     create: {
       organizationId: request.organizationId,
       externalSource: request.connector.id,
@@ -308,16 +423,54 @@ async function upsertProductVersion(
   now: Date,
   mode: SyncMode,
 ): Promise<void> {
-  const existed = await recordExists(prisma, "productVersion", request.organizationId, request.connector.id, source.externalId);
+  const existed = await recordExists(
+    prisma,
+    "productVersion",
+    request.organizationId,
+    request.connector.id,
+    source.externalId,
+  );
   countWrite(existed, counters);
-  if (mode === "DRY_RUN") return;
+
+  if (mode === "DRY_RUN") {
+    ids.set(source.externalId, dryRunId("version", source.externalId));
+    return;
+  }
 
   const record = await prisma.productVersion.upsert({
-    where: { organizationId_externalSource_externalId: { organizationId: request.organizationId, externalSource: request.connector.id, externalId: source.externalId } },
-    create: { organizationId: request.organizationId, assetId, externalSource: request.connector.id, externalId: source.externalId, version: source.version, releaseName: source.releaseName, lifecycleStatus: source.lifecycleStatus, releaseDate: source.releaseDate, endOfSupportDate: source.endOfSupportDate, sourceUpdatedAt: source.sourceUpdatedAt, lastSeenAt: now, rawMetadata: json(source.rawMetadata) },
-    update: { assetId, version: source.version, releaseName: source.releaseName, lifecycleStatus: source.lifecycleStatus, releaseDate: source.releaseDate, endOfSupportDate: source.endOfSupportDate, sourceUpdatedAt: source.sourceUpdatedAt, lastSeenAt: now, rawMetadata: json(source.rawMetadata) },
+    where: uniqueWhere(
+      request.organizationId,
+      request.connector.id,
+      source.externalId,
+    ),
+    create: {
+      organizationId: request.organizationId,
+      assetId,
+      externalSource: request.connector.id,
+      externalId: source.externalId,
+      version: source.version,
+      releaseName: source.releaseName,
+      lifecycleStatus: source.lifecycleStatus,
+      releaseDate: source.releaseDate,
+      endOfSupportDate: source.endOfSupportDate,
+      sourceUpdatedAt: source.sourceUpdatedAt,
+      lastSeenAt: now,
+      rawMetadata: json(source.rawMetadata),
+    },
+    update: {
+      assetId,
+      version: source.version,
+      releaseName: source.releaseName,
+      lifecycleStatus: source.lifecycleStatus,
+      releaseDate: source.releaseDate,
+      endOfSupportDate: source.endOfSupportDate,
+      sourceUpdatedAt: source.sourceUpdatedAt,
+      lastSeenAt: now,
+      rawMetadata: json(source.rawMetadata),
+    },
     select: { id: true },
   });
+
   ids.set(source.externalId, record.id);
 }
 
@@ -331,16 +484,56 @@ async function upsertSbom(
   now: Date,
   mode: SyncMode,
 ): Promise<void> {
-  const existed = await recordExists(prisma, "sbomDocument", request.organizationId, request.connector.id, source.externalId);
+  const existed = await recordExists(
+    prisma,
+    "sbomDocument",
+    request.organizationId,
+    request.connector.id,
+    source.externalId,
+  );
   countWrite(existed, counters);
-  if (mode === "DRY_RUN") return;
+
+  if (mode === "DRY_RUN") {
+    ids.set(source.externalId, dryRunId("sbom", source.externalId));
+    return;
+  }
 
   const record = await prisma.sbomDocument.upsert({
-    where: { organizationId_externalSource_externalId: { organizationId: request.organizationId, externalSource: request.connector.id, externalId: source.externalId } },
-    create: { organizationId: request.organizationId, productVersionId, externalSource: request.connector.id, externalId: source.externalId, format: source.format, specVersion: source.specVersion, serialNumber: source.serialNumber, documentVersion: source.documentVersion, generatedAt: source.generatedAt, checksum: source.checksum, lastSeenAt: now, rawDocument: json(source.rawDocument), rawMetadata: json(source.rawMetadata) },
-    update: { productVersionId, format: source.format, specVersion: source.specVersion, serialNumber: source.serialNumber, documentVersion: source.documentVersion, generatedAt: source.generatedAt, checksum: source.checksum, lastSeenAt: now, rawDocument: json(source.rawDocument), rawMetadata: json(source.rawMetadata) },
+    where: uniqueWhere(
+      request.organizationId,
+      request.connector.id,
+      source.externalId,
+    ),
+    create: {
+      organizationId: request.organizationId,
+      productVersionId,
+      externalSource: request.connector.id,
+      externalId: source.externalId,
+      format: source.format,
+      specVersion: source.specVersion,
+      serialNumber: source.serialNumber,
+      documentVersion: source.documentVersion,
+      generatedAt: source.generatedAt,
+      checksum: source.checksum,
+      lastSeenAt: now,
+      rawDocument: json(source.rawDocument),
+      rawMetadata: json(source.rawMetadata),
+    },
+    update: {
+      productVersionId,
+      format: source.format,
+      specVersion: source.specVersion,
+      serialNumber: source.serialNumber,
+      documentVersion: source.documentVersion,
+      generatedAt: source.generatedAt,
+      checksum: source.checksum,
+      lastSeenAt: now,
+      rawDocument: json(source.rawDocument),
+      rawMetadata: json(source.rawMetadata),
+    },
     select: { id: true },
   });
+
   ids.set(source.externalId, record.id);
 }
 
@@ -354,22 +547,79 @@ async function upsertComponent(
   now: Date,
   mode: SyncMode,
 ): Promise<void> {
-  const existed = await recordExists(prisma, "softwareComponent", request.organizationId, request.connector.id, source.externalId);
+  const existed = await recordExists(
+    prisma,
+    "softwareComponent",
+    request.organizationId,
+    request.connector.id,
+    source.externalId,
+  );
   countWrite(existed, counters);
-  if (mode === "DRY_RUN") return;
+
+  if (mode === "DRY_RUN") {
+    ids.set(source.externalId, dryRunId("component", source.externalId));
+    return;
+  }
 
   const component = await prisma.softwareComponent.upsert({
-    where: { organizationId_externalSource_externalId: { organizationId: request.organizationId, externalSource: request.connector.id, externalId: source.externalId } },
-    create: { organizationId: request.organizationId, externalSource: request.connector.id, externalId: source.externalId, name: source.name, version: source.version, supplier: source.supplier, componentType: source.componentType, purl: source.purl, cpe: source.cpe, swid: source.swid, licenseExpression: source.licenseExpression, lastSeenAt: now, rawMetadata: json(source.rawMetadata) },
-    update: { name: source.name, version: source.version, supplier: source.supplier, componentType: source.componentType, purl: source.purl, cpe: source.cpe, swid: source.swid, licenseExpression: source.licenseExpression, lastSeenAt: now, rawMetadata: json(source.rawMetadata) },
+    where: uniqueWhere(
+      request.organizationId,
+      request.connector.id,
+      source.externalId,
+    ),
+    create: {
+      organizationId: request.organizationId,
+      externalSource: request.connector.id,
+      externalId: source.externalId,
+      name: source.name,
+      version: source.version,
+      supplier: source.supplier,
+      componentType: source.componentType,
+      purl: source.purl,
+      cpe: source.cpe,
+      swid: source.swid,
+      licenseExpression: source.licenseExpression,
+      lastSeenAt: now,
+      rawMetadata: json(source.rawMetadata),
+    },
+    update: {
+      name: source.name,
+      version: source.version,
+      supplier: source.supplier,
+      componentType: source.componentType,
+      purl: source.purl,
+      cpe: source.cpe,
+      swid: source.swid,
+      licenseExpression: source.licenseExpression,
+      lastSeenAt: now,
+      rawMetadata: json(source.rawMetadata),
+    },
     select: { id: true },
   });
 
   await prisma.sbomComponent.upsert({
-    where: { sbomDocumentId_componentId: { sbomDocumentId, componentId: component.id } },
-    create: { sbomDocumentId, componentId: component.id, relationshipType: source.relationshipType, scope: source.scope, directDependency: source.directDependency, rawMetadata: json(source.rawMetadata) },
-    update: { relationshipType: source.relationshipType, scope: source.scope, directDependency: source.directDependency, rawMetadata: json(source.rawMetadata) },
+    where: {
+      sbomDocumentId_componentId: {
+        sbomDocumentId,
+        componentId: component.id,
+      },
+    },
+    create: {
+      sbomDocumentId,
+      componentId: component.id,
+      relationshipType: source.relationshipType,
+      scope: source.scope,
+      directDependency: source.directDependency,
+      rawMetadata: json(source.rawMetadata),
+    },
+    update: {
+      relationshipType: source.relationshipType,
+      scope: source.scope,
+      directDependency: source.directDependency,
+      rawMetadata: json(source.rawMetadata),
+    },
   });
+
   ids.set(source.externalId, component.id);
 }
 
@@ -383,13 +633,60 @@ async function upsertVulnerability(
   counters: SyncCounters,
   mode: SyncMode,
 ): Promise<void> {
-  const existed = await recordExists(prisma, "assetVulnerability", request.organizationId, request.connector.id, source.externalId);
+  const existed = await recordExists(
+    prisma,
+    "assetVulnerability",
+    request.organizationId,
+    request.connector.id,
+    source.externalId,
+  );
   countWrite(existed, counters);
   if (mode === "DRY_RUN") return;
 
   await prisma.assetVulnerability.upsert({
-    where: { organizationId_externalSource_externalId: { organizationId: request.organizationId, externalSource: request.connector.id, externalId: source.externalId } },
-    create: { organizationId: request.organizationId, assetId, productVersionId, componentId, externalSource: request.connector.id, externalId: source.externalId, vulnerabilityId: source.vulnerabilityId, status: source.status, vexStatus: source.vexStatus, severity: source.severity, cvssScore: source.cvssScore, epssScore: source.epssScore, kev: source.kev, exploitable: source.exploitable, firstSeenAt: source.firstSeenAt, lastSeenAt: source.lastSeenAt, sourceUpdatedAt: source.sourceUpdatedAt, remediation: source.remediation, rawMetadata: json(source.rawMetadata) },
-    update: { assetId, productVersionId, componentId, vulnerabilityId: source.vulnerabilityId, status: source.status, vexStatus: source.vexStatus, severity: source.severity, cvssScore: source.cvssScore, epssScore: source.epssScore, kev: source.kev, exploitable: source.exploitable, firstSeenAt: source.firstSeenAt, lastSeenAt: source.lastSeenAt, sourceUpdatedAt: source.sourceUpdatedAt, remediation: source.remediation, rawMetadata: json(source.rawMetadata) },
+    where: uniqueWhere(
+      request.organizationId,
+      request.connector.id,
+      source.externalId,
+    ),
+    create: {
+      organizationId: request.organizationId,
+      assetId,
+      productVersionId,
+      componentId,
+      externalSource: request.connector.id,
+      externalId: source.externalId,
+      vulnerabilityId: source.vulnerabilityId,
+      status: source.status,
+      vexStatus: source.vexStatus,
+      severity: source.severity,
+      cvssScore: source.cvssScore,
+      epssScore: source.epssScore,
+      kev: source.kev,
+      exploitable: source.exploitable,
+      firstSeenAt: source.firstSeenAt,
+      lastSeenAt: source.lastSeenAt,
+      sourceUpdatedAt: source.sourceUpdatedAt,
+      remediation: source.remediation,
+      rawMetadata: json(source.rawMetadata),
+    },
+    update: {
+      assetId,
+      productVersionId,
+      componentId,
+      vulnerabilityId: source.vulnerabilityId,
+      status: source.status,
+      vexStatus: source.vexStatus,
+      severity: source.severity,
+      cvssScore: source.cvssScore,
+      epssScore: source.epssScore,
+      kev: source.kev,
+      exploitable: source.exploitable,
+      firstSeenAt: source.firstSeenAt,
+      lastSeenAt: source.lastSeenAt,
+      sourceUpdatedAt: source.sourceUpdatedAt,
+      remediation: source.remediation,
+      rawMetadata: json(source.rawMetadata),
+    },
   });
 }
