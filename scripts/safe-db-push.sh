@@ -9,6 +9,7 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/pre_schema_${TIMESTAMP}.sql.gz"
 RAW_DIFF_FILE="${BACKUP_DIR}/schema_diff_${TIMESTAMP}.sql"
 CORE_DIFF_FILE="${BACKUP_DIR}/schema_core_${TIMESTAMP}.sql"
+LOCKED_CORE_DIFF_FILE="${BACKUP_DIR}/schema_core_locked_${TIMESTAMP}.sql"
 DEFERRED_INDEX_FILE="${BACKUP_DIR}/schema_deferred_indexes_${TIMESTAMP}.sql"
 SERVICES_STOPPED=0
 WATCHDOG_PID=""
@@ -28,6 +29,16 @@ terminate_schema_sessions() {
         OR query ILIKE '%prisma%'
       );
   " >/dev/null 2>&1 || true
+}
+
+terminate_all_application_sessions() {
+  $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(pid)
+    FROM pg_stat_activity
+    WHERE datname = current_database()
+      AND pid <> pg_backend_pid()
+      AND usename = '${DB_USER}';
+  " >/dev/null
 }
 
 reset_role_timeouts() {
@@ -77,13 +88,7 @@ $COMPOSE stop app collector
 SERVICES_STOPPED=1
 
 echo "==> Terminating stale ThreatPulse database sessions"
-$COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
-  SELECT pg_terminate_backend(pid)
-  FROM pg_stat_activity
-  WHERE datname = current_database()
-    AND pid <> pg_backend_pid()
-    AND usename = '${DB_USER}';
-"
+terminate_all_application_sessions
 
 echo "==> Checking for duplicate organization/threat keys"
 DUPLICATES="$($COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -At -v ON_ERROR_STOP=1 -c '
@@ -137,10 +142,22 @@ if grep -Eq '^CREATE INDEX ' "$CORE_DIFF_FILE"; then
   exit 1
 fi
 
-echo "==> Applying core schema SQL: $CORE_DIFF_FILE"
+# The earlier session drain occurs before Prisma diff generation. Drain once more
+# immediately before applying SQL, then acquire an ACCESS EXCLUSIVE lock inside
+# the same transaction. This removes the race where a collector or external
+# process inserts into Threat between the first drain and unique-index creation.
+echo "==> Draining database sessions immediately before schema lock"
+terminate_all_application_sessions
+
+{
+  printf '%s\n' 'LOCK TABLE "Threat" IN ACCESS EXCLUSIVE MODE;'
+  cat "$CORE_DIFF_FILE"
+} > "$LOCKED_CORE_DIFF_FILE"
+
+echo "==> Applying core schema SQL transactionally: $LOCKED_CORE_DIFF_FILE"
 $COMPOSE exec -T postgres \
-  psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
-  < "$CORE_DIFF_FILE"
+  psql -X -1 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+  < "$LOCKED_CORE_DIFF_FILE"
 
 if [ -s "$DEFERRED_INDEX_FILE" ]; then
   echo "==> Deferred non-unique indexes saved to: $DEFERRED_INDEX_FILE"
