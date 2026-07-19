@@ -23,6 +23,7 @@ terminate_schema_sessions() {
       AND usename = '${DB_USER}'
       AND (
         query ILIKE 'CREATE INDEX%'
+        OR query ILIKE 'CREATE UNIQUE INDEX%'
         OR query ILIKE 'ALTER TABLE%'
         OR query ILIKE 'CREATE TABLE%'
         OR query ILIKE 'DROP INDEX%'
@@ -122,11 +123,10 @@ $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c
 ) &
 WATCHDOG_PID=$!
 
-# Generate the exact SQL Prisma wants for the live database. Table changes,
-# foreign keys, and constraints are applied in one transaction. Ordinary indexes
-# and the Threat tenant-uniqueness index are moved to a separate non-transactional
-# phase and built with CONCURRENTLY. PostgreSQL does not permit CREATE INDEX
-# CONCURRENTLY inside a transaction block.
+# Generate the exact SQL Prisma wants for the live database. Every CREATE INDEX
+# statement, including every CREATE UNIQUE INDEX statement, is moved to a separate
+# non-transactional phase and rewritten with CONCURRENTLY. This avoids index builds
+# while the core DDL transaction holds locks on existing production tables.
 echo "==> Generating Prisma schema diff: $RAW_DIFF_FILE"
 $COMPOSE run --rm -T --no-deps \
   --entrypoint sh \
@@ -136,32 +136,38 @@ $COMPOSE run --rm -T --no-deps \
 
 : > "$DEFERRED_INDEX_FILE"
 awk '
-  /^CREATE INDEX / {
-    sub(/^CREATE INDEX /, "CREATE INDEX CONCURRENTLY ")
+  /^CREATE UNIQUE INDEX / {
+    sub(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX CONCURRENTLY ")
     print > deferred
     next
   }
-  /^CREATE UNIQUE INDEX "Threat_organizationId_threatId_key" / {
-    sub(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX CONCURRENTLY ")
+  /^CREATE INDEX / {
+    sub(/^CREATE INDEX /, "CREATE INDEX CONCURRENTLY ")
     print > deferred
     next
   }
   { print }
 ' deferred="$DEFERRED_INDEX_FILE" "$RAW_DIFF_FILE" > "$CORE_DIFF_FILE"
 
-if grep -Eq '^CREATE INDEX ' "$CORE_DIFF_FILE"; then
-  echo "ERROR: A non-unique CREATE INDEX statement remained in the core migration." >&2
+if grep -Eq '^CREATE( UNIQUE)? INDEX ' "$CORE_DIFF_FILE"; then
+  echo "ERROR: An index statement remained in the core migration." >&2
+  grep -nE '^CREATE( UNIQUE)? INDEX ' "$CORE_DIFF_FILE" >&2 || true
   exit 1
 fi
 
-if grep -Eq '^CREATE UNIQUE INDEX "Threat_organizationId_threatId_key" ' "$CORE_DIFF_FILE"; then
-  echo "ERROR: Threat tenant unique index remained in the core migration." >&2
+RAW_INDEX_COUNT="$(grep -Ec '^CREATE( UNIQUE)? INDEX ' "$RAW_DIFF_FILE" || true)"
+DEFERRED_INDEX_COUNT="$(grep -Ec '^CREATE( UNIQUE)? INDEX CONCURRENTLY ' "$DEFERRED_INDEX_FILE" || true)"
+
+if [ "$RAW_INDEX_COUNT" != "$DEFERRED_INDEX_COUNT" ]; then
+  echo "ERROR: Index split mismatch: generated $RAW_INDEX_COUNT indexes but deferred $DEFERRED_INDEX_COUNT." >&2
   exit 1
 fi
 
-# The earlier session drain occurs before Prisma diff generation. Drain once more
-# immediately before applying SQL, then acquire an ACCESS EXCLUSIVE lock inside
-# the same transaction so core table and constraint changes have a stable view.
+echo "==> Deferred $DEFERRED_INDEX_COUNT index statements from the core transaction"
+
+# Drain once more immediately before applying SQL, then acquire an ACCESS
+# EXCLUSIVE lock inside the same transaction so core table and constraint changes
+# have a stable view. No CREATE INDEX statement is permitted in this file.
 echo "==> Draining database sessions immediately before schema lock"
 terminate_all_application_sessions
 
@@ -175,8 +181,15 @@ $COMPOSE exec -T postgres \
   psql -X -1 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
   < "$LOCKED_CORE_DIFF_FILE"
 
+# Clean up any dead or aborted tuples left by previously terminated writers before
+# PostgreSQL scans Threat to build its new tenant-uniqueness index.
+echo "==> Vacuuming Threat before deferred index creation"
+$COMPOSE exec -T postgres \
+  psql -X -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+  -c 'VACUUM (ANALYZE, FREEZE) "Threat";'
+
 if [ -s "$DEFERRED_INDEX_FILE" ]; then
-  echo "==> Applying deferred indexes concurrently: $DEFERRED_INDEX_FILE"
+  echo "==> Applying all deferred indexes concurrently: $DEFERRED_INDEX_FILE"
   # Do not add -1 here: CREATE INDEX CONCURRENTLY must run outside a transaction.
   $COMPOSE exec -T postgres \
     psql -X -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
