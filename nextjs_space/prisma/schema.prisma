@@ -12,9 +12,12 @@ model ParentOrganization {
   id            String         @id @default(cuid())
   name          String
   slug          String         @unique
+  archivedAt    DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   organizations Organization[]
+
+  @@index([archivedAt])
 }
 
 model Organization {
@@ -50,6 +53,7 @@ model Department {
   organizationId String
   name           String
   slug           String
+  archivedAt     DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -59,6 +63,7 @@ model Department {
 
   @@unique([organizationId, slug])
   @@index([organizationId])
+  @@index([archivedAt])
 }
 
 model User {
@@ -182,9 +187,9 @@ model ProductVersion {
   endOfSupportDate    DateTime?
   sourceUpdatedAt     DateTime?
   lastSeenAt          DateTime?
-  rawMetadata         Json?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  rawMetadata          Json?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
   organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   asset               Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
   sbomDocuments       SbomDocument[]
@@ -211,8 +216,8 @@ model SbomDocument {
   checksum            String?
   rawDocument         Json?
   rawMetadata         Json?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
   organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   productVersion      ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
   components          SbomComponent[]
@@ -257,8 +262,8 @@ model SbomComponent {
   relationshipType   String?
   scope               String?
   directDependency    Boolean?
-  rawMetadata         Json?
-  createdAt           DateTime          @default(now())
+  rawMetadata          Json?
+  createdAt            DateTime          @default(now())
   sbomDocument        SbomDocument      @relation(fields: [sbomDocumentId], references: [id], onDelete: Cascade)
   component           SoftwareComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
 
@@ -338,8 +343,8 @@ model ExternalIdentityMapping {
   externalDisplayName  String?
   mappingMethod        String?
   metadata             Json?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user                 User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
 
