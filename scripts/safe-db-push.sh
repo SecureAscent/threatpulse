@@ -7,6 +7,9 @@ DB_NAME="${POSTGRES_DB:-threatpulse}"
 BACKUP_DIR="backups"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/pre_schema_${TIMESTAMP}.sql.gz"
+RAW_DIFF_FILE="${BACKUP_DIR}/schema_diff_${TIMESTAMP}.sql"
+CORE_DIFF_FILE="${BACKUP_DIR}/schema_core_${TIMESTAMP}.sql"
+DEFERRED_INDEX_FILE="${BACKUP_DIR}/schema_deferred_indexes_${TIMESTAMP}.sql"
 SERVICES_STOPPED=0
 WATCHDOG_PID=""
 
@@ -62,7 +65,7 @@ echo "==> Verifying PostgreSQL is available"
 $COMPOSE exec -T postgres pg_isready -U "$DB_USER" -d "$DB_NAME"
 
 # Prisma schema assets are baked into the production app image at build time.
-# Always rebuild before db push so migrations cannot run against a stale schema.
+# Always rebuild before generating the database diff.
 echo "==> Rebuilding app image with current Prisma schema"
 $COMPOSE build app
 
@@ -114,11 +117,36 @@ $COMPOSE exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c
 ) &
 WATCHDOG_PID=$!
 
-echo "==> Applying Prisma schema"
-timeout --foreground --kill-after=30s 20m \
-  $COMPOSE run --rm \
+# Generate the exact SQL Prisma wants for the live database. We deliberately
+# defer only ordinary secondary indexes because CREATE INDEX is the operation
+# that is blocking this production database. CREATE UNIQUE INDEX statements,
+# table changes, foreign keys, and constraints remain in the core migration.
+echo "==> Generating Prisma schema diff: $RAW_DIFF_FILE"
+$COMPOSE run --rm -T --no-deps \
   --entrypoint sh \
   app \
-  -c 'cd /app/prisma-tools && ./node_modules/.bin/prisma db push --schema=/app/prisma-tools/prisma/schema.prisma --skip-generate --accept-data-loss'
+  -c 'cd /app/prisma-tools && ./node_modules/.bin/prisma migrate diff --from-schema-datasource /app/prisma-tools/prisma/schema.prisma --to-schema-datamodel /app/prisma-tools/prisma/schema.prisma --script' \
+  > "$RAW_DIFF_FILE"
 
-echo "==> Schema deployment completed successfully"
+awk '/^CREATE INDEX / { print > deferred; next } { print }' \
+  deferred="$DEFERRED_INDEX_FILE" \
+  "$RAW_DIFF_FILE" > "$CORE_DIFF_FILE"
+
+if grep -Eq '^CREATE INDEX ' "$CORE_DIFF_FILE"; then
+  echo "ERROR: A non-unique CREATE INDEX statement remained in the core migration." >&2
+  exit 1
+fi
+
+echo "==> Applying core schema SQL: $CORE_DIFF_FILE"
+$COMPOSE exec -T postgres \
+  psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+  < "$CORE_DIFF_FILE"
+
+if [ -s "$DEFERRED_INDEX_FILE" ]; then
+  echo "==> Deferred non-unique indexes saved to: $DEFERRED_INDEX_FILE"
+else
+  rm -f "$DEFERRED_INDEX_FILE"
+  echo "==> No non-unique indexes required deferral"
+fi
+
+echo "==> Core schema deployment completed successfully"
