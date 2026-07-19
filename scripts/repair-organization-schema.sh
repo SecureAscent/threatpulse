@@ -50,10 +50,10 @@ echo "==> Repairing organization hierarchy columns"
 BEGIN;
 
 ALTER TABLE "Organization"
-  ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'UTC';
-
-ALTER TABLE "Organization"
-  ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3);
+  ADD COLUMN IF NOT EXISTS "description" TEXT,
+  ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'UTC',
+  ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "parentOrganizationId" TEXT;
 
 ALTER TABLE "ParentOrganization"
   ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3);
@@ -61,10 +61,30 @@ ALTER TABLE "ParentOrganization"
 ALTER TABLE "Department"
   ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'Organization_parentOrganizationId_fkey'
+  ) THEN
+    ALTER TABLE "Organization"
+      ADD CONSTRAINT "Organization_parentOrganizationId_fkey"
+      FOREIGN KEY ("parentOrganizationId")
+      REFERENCES "ParentOrganization"("id")
+      ON DELETE SET NULL
+      ON UPDATE CASCADE;
+  END IF;
+END
+$$;
+
 COMMIT;
 
 CREATE INDEX IF NOT EXISTS "Organization_archivedAt_idx"
   ON "Organization"("archivedAt");
+
+CREATE INDEX IF NOT EXISTS "Organization_parentOrganizationId_idx"
+  ON "Organization"("parentOrganizationId");
 
 CREATE INDEX IF NOT EXISTS "ParentOrganization_archivedAt_idx"
   ON "ParentOrganization"("archivedAt");
@@ -80,7 +100,7 @@ SELECT table_name, column_name, data_type, is_nullable, column_default
 FROM information_schema.columns
 WHERE table_schema = '\''public'\''
   AND (
-    (table_name = '\''Organization'\'' AND column_name IN ('\''timezone'\'', '\''archivedAt'\''))
+    (table_name = '\''Organization'\'' AND column_name IN ('\''description'\'', '\''timezone'\'', '\''archivedAt'\'', '\''parentOrganizationId'\''))
     OR (table_name = '\''ParentOrganization'\'' AND column_name = '\''archivedAt'\'')
     OR (table_name = '\''Department'\'' AND column_name = '\''archivedAt'\'')
   )
