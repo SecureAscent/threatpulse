@@ -3,7 +3,8 @@ import { prisma } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { canManageRole, hasPermission, isAppRole } from '@/lib/rbac';
+import { canManageRole, hasPermission, isAppRole, normalizeAppRole } from '@/lib/rbac';
+import { writeAuditEvent } from '@/lib/audit';
 
 const MANAGEABLE_ROLES = ['ADMIN', 'ANALYST'] as const;
 
@@ -22,6 +23,16 @@ async function getAdminUser(): Promise<AdminSessionUser | null> {
 
 function unauthorized() {
   return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+}
+
+function auditContext(admin: AdminSessionUser, organizationId: string, departmentId?: string | null) {
+  return {
+    userId: admin.id,
+    role: normalizeAppRole(admin.role),
+    organizationId,
+    departmentId: departmentId ?? null,
+    parentOrganizationId: null,
+  };
 }
 
 const userSelect = {
@@ -110,6 +121,16 @@ export async function POST(req: Request) {
       },
       select: userSelect,
     });
+
+    await writeAuditEvent({
+      context: auditContext(admin, targetOrganizationId, user.departmentId),
+      action: 'user.create',
+      entityType: 'User',
+      entityId: user.id,
+      departmentId: user.departmentId,
+      metadata: { email: user.email, role: user.role },
+    });
+
     return NextResponse.json({ message: 'User created successfully', user }, { status: 201 });
   } catch (error) {
     console.error('[USERS_POST_ERROR]', error);
@@ -133,7 +154,7 @@ export async function PATCH(req: Request) {
 
     const target = await prisma.user.findFirst({
       where: admin.role === 'SUPERADMIN' ? { id: userId } : { id: userId, organizationId: admin.organizationId },
-      select: { id: true, role: true, organizationId: true },
+      select: { id: true, email: true, role: true, organizationId: true, departmentId: true },
     });
     if (!target) return NextResponse.json({ message: 'User not found' }, { status: 404 });
     if (!canManageRole(admin.role, target.role)) {
@@ -166,6 +187,22 @@ export async function PATCH(req: Request) {
       },
       select: userSelect,
     });
+
+    if (user.organizationId) {
+      await writeAuditEvent({
+        context: auditContext(admin, user.organizationId, user.departmentId),
+        action: 'user.update',
+        entityType: 'User',
+        entityId: user.id,
+        departmentId: user.departmentId,
+        metadata: {
+          email: user.email,
+          before: { role: target.role, organizationId: target.organizationId, departmentId: target.departmentId },
+          after: { role: user.role, organizationId: user.organizationId, departmentId: user.departmentId },
+        },
+      });
+    }
+
     return NextResponse.json({ message: 'User updated successfully', user });
   } catch (error) {
     console.error('[USERS_PATCH_ERROR]', error);
@@ -183,7 +220,7 @@ export async function DELETE(req: Request) {
 
     const target = await prisma.user.findFirst({
       where: admin.role === 'SUPERADMIN' ? { id: userId } : { id: userId, organizationId: admin.organizationId },
-      select: { id: true, role: true },
+      select: { id: true, email: true, role: true, organizationId: true, departmentId: true },
     });
     if (!target) return NextResponse.json({ message: 'User not found' }, { status: 404 });
     if (!canManageRole(admin.role, target.role)) {
@@ -191,6 +228,18 @@ export async function DELETE(req: Request) {
     }
 
     await prisma.user.delete({ where: { id: userId } });
+
+    if (target.organizationId) {
+      await writeAuditEvent({
+        context: auditContext(admin, target.organizationId, target.departmentId),
+        action: 'user.delete',
+        entityType: 'User',
+        entityId: target.id,
+        departmentId: target.departmentId,
+        metadata: { email: target.email, role: target.role },
+      });
+    }
+
     return NextResponse.json({ message: 'User deleted successfully' });
   } catch (error) {
     console.error('[USERS_DELETE_ERROR]', error);
