@@ -19,11 +19,11 @@ async function loadAuthorizationState(userId: string) {
 function applyAuthorizationState(token: any, user: any) {
   token.role = user.role;
   token.organizationId = user.organizationId;
-  token.organizationName = user.organization?.name ?? null;
+  token.organizationName = user.organization?.name ?? user.organizationName ?? null;
   token.departmentId = user.departmentId;
-  token.departmentName = user.department?.name ?? null;
-  token.parentOrganizationId = user.organization?.parentOrganizationId ?? null;
-  token.parentOrganizationName = user.organization?.parentOrganization?.name ?? null;
+  token.departmentName = user.department?.name ?? user.departmentName ?? null;
+  token.parentOrganizationId = user.organization?.parentOrganizationId ?? user.parentOrganizationId ?? null;
+  token.parentOrganizationName = user.organization?.parentOrganization?.name ?? user.parentOrganizationName ?? null;
   token.authorizationRefreshedAt = Date.now();
   token.accessRevoked = false;
 }
@@ -40,15 +40,16 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials: any) {
         if (!credentials?.email || !credentials?.password) return null;
         try {
+          const email = String(credentials.email).trim().toLowerCase();
           const user = await prisma.user.findUnique({
-            where: { email: credentials.email },
+            where: { email },
             include: {
               organization: { include: { parentOrganization: true } },
               department: true,
             },
           });
           if (!user) return null;
-          const isValid = await bcrypt.compare(credentials.password, user.password);
+          const isValid = await bcrypt.compare(String(credentials.password), user.password);
           if (!isValid) return null;
           return {
             id: user.id,
@@ -62,7 +63,8 @@ export const authOptions: NextAuthOptions = {
             parentOrganizationId: user.organization?.parentOrganizationId ?? null,
             parentOrganizationName: user.organization?.parentOrganization?.name ?? null,
           } as any;
-        } catch {
+        } catch (error) {
+          console.error('[AUTH_CREDENTIALS_ERROR]', error);
           return null;
         }
       },
@@ -80,7 +82,9 @@ export const authOptions: NextAuthOptions = {
       if (token.sub && Date.now() - refreshedAt >= AUTH_REFRESH_INTERVAL_MS) {
         try {
           const currentUser = await loadAuthorizationState(String(token.sub));
-          if (!currentUser || !currentUser.organizationId) {
+          const role = String(currentUser?.role || token.role || '').toUpperCase();
+          const requiresOrganization = role !== 'SUPERADMIN';
+          if (!currentUser || (requiresOrganization && !currentUser.organizationId)) {
             token.accessRevoked = true;
             token.organizationId = null;
             token.departmentId = null;
