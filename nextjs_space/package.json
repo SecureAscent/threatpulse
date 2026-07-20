@@ -1,6 +1,7 @@
 {
   "name": "app",
   "private": true,
+  "packageManager": "yarn@4.9.2",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
