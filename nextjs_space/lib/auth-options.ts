@@ -16,6 +16,19 @@ async function loadAuthorizationState(userId: string) {
   });
 }
 
+function authorizationStateIsActive(user: any): boolean {
+  const role = String(user?.role || '').toUpperCase();
+  if (!user) return false;
+  if (role === 'SUPERADMIN') return true;
+  if (!user.organizationId || !user.organization || user.organization.archivedAt) return false;
+  if (user.organization.parentOrganization?.archivedAt) return false;
+  if (user.departmentId) {
+    if (!user.department || user.department.archivedAt) return false;
+    if (user.department.organizationId !== user.organizationId) return false;
+  }
+  return true;
+}
+
 function applyAuthorizationState(token: any, user: any) {
   token.role = user.role;
   token.organizationId = user.organizationId;
@@ -26,6 +39,17 @@ function applyAuthorizationState(token: any, user: any) {
   token.parentOrganizationName = user.organization?.parentOrganization?.name ?? user.parentOrganizationName ?? null;
   token.authorizationRefreshedAt = Date.now();
   token.accessRevoked = false;
+}
+
+function revokeAuthorizationState(token: any) {
+  token.accessRevoked = true;
+  token.organizationId = null;
+  token.organizationName = null;
+  token.departmentId = null;
+  token.departmentName = null;
+  token.parentOrganizationId = null;
+  token.parentOrganizationName = null;
+  token.authorizationRefreshedAt = Date.now();
 }
 
 export const authOptions: NextAuthOptions = {
@@ -48,7 +72,7 @@ export const authOptions: NextAuthOptions = {
               department: true,
             },
           });
-          if (!user) return null;
+          if (!user || !authorizationStateIsActive(user)) return null;
           const isValid = await bcrypt.compare(String(credentials.password), user.password);
           if (!isValid) return null;
           return {
@@ -82,18 +106,14 @@ export const authOptions: NextAuthOptions = {
       if (token.sub && Date.now() - refreshedAt >= AUTH_REFRESH_INTERVAL_MS) {
         try {
           const currentUser = await loadAuthorizationState(String(token.sub));
-          const role = String(currentUser?.role || token.role || '').toUpperCase();
-          const requiresOrganization = role !== 'SUPERADMIN';
-          if (!currentUser || (requiresOrganization && !currentUser.organizationId)) {
-            token.accessRevoked = true;
-            token.organizationId = null;
-            token.departmentId = null;
-            token.authorizationRefreshedAt = Date.now();
+          if (!authorizationStateIsActive(currentUser)) {
+            revokeAuthorizationState(token);
           } else {
             applyAuthorizationState(token, currentUser);
           }
         } catch (error) {
           console.error('Failed to refresh authorization state:', error);
+          revokeAuthorizationState(token);
         }
       }
 
