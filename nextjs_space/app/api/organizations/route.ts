@@ -87,12 +87,15 @@ export async function POST(request: NextRequest) {
     );
 
     if (parentOrganizationId) {
-      const parent = await prisma.parentOrganization.findUnique({
-        where: { id: parentOrganizationId },
+      const parent = await prisma.parentOrganization.findFirst({
+        where: { id: parentOrganizationId, archivedAt: null },
         select: { id: true },
       });
       if (!parent) {
-        return NextResponse.json({ error: 'Parent organization not found.' }, { status: 400 });
+        return NextResponse.json(
+          { error: 'Parent organization not found or archived.' },
+          { status: 400 },
+        );
       }
     }
 
