@@ -65,11 +65,15 @@ export async function POST(req: NextRequest) {
 
     if (targetDepartmentId) {
       const validDepartment = await prisma.department.findFirst({
-        where: { id: targetDepartmentId, organizationId: context.organizationId },
+        where: {
+          id: targetDepartmentId,
+          organizationId: context.organizationId,
+          archivedAt: null,
+        },
         select: { id: true },
       });
       if (!validDepartment) {
-        return NextResponse.json({ error: 'Invalid department' }, { status: 400 });
+        return NextResponse.json({ error: 'Invalid or archived department' }, { status: 400 });
       }
     }
 
