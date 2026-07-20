@@ -80,14 +80,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
-          cache-dependency-path: nextjs_space/yarn.lock
 
       - name: Enable pinned Yarn
         run: |
           corepack enable
           corepack prepare yarn@4.9.2 --activate
           yarn --version
+
+      - name: Restore Yarn cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            nextjs_space/.yarn/cache
+            nextjs_space/.yarn/install-state.gz
+          key: ${{ runner.os }}-yarn-${{ hashFiles('nextjs_space/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
 
       - name: Install dependencies
         run: yarn install --immutable
