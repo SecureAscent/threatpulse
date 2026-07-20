@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   Shield, LayoutDashboard, AlertTriangle, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
-  FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket
+  FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -17,12 +17,18 @@ const userItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/product-portfolio', label: 'Product Portfolio', icon: Package },
   { href: '/jira-tickets', label: 'Jira Tickets', icon: Ticket },
+  { href: '/notifications', label: 'Notifications', icon: Bell },
   { href: '/threat-feed', label: 'Threat Feed', icon: Rss },
 ];
 
 const adminItems = [
   { href: '/actioned-threats', label: 'Actioned Threats', icon: CheckSquare },
   { href: '/admin', label: 'Admin', icon: Settings },
+];
+
+const settingsItems = [
+  { href: '/settings/notifications', label: 'Notifications', icon: Bell },
+  { href: '/integrations', label: 'Integrations', icon: Plug },
 ];
 
 const executiveItems = [
@@ -93,6 +99,8 @@ export default function AppSidebar() {
         )}
 
         <NavSection label="Executive" items={executiveItems} collapsed={collapsed} pathname={pathname} />
+        
+        <NavSection label="Settings" items={settingsItems} collapsed={collapsed} pathname={pathname} />
       </nav>
 
       {/* Footer */}

@@ -19,6 +19,7 @@ model Organization {
   integrationConfigs IntegrationConfig[]
   jiraTickets        JiraTicket[]
   cybellumAssets     CybellumAsset[]
+  notificationLogs   NotificationLog[]
 }
 
 model User {
@@ -35,6 +36,9 @@ model User {
   updatedAt      DateTime     @updatedAt
   accounts       Account[]
   sessions       Session[]
+  notificationPreference NotificationPreference?
+  notificationLogs       NotificationLog[]
+  digestQueue            DigestQueue[]
 }
 
 model Threat {
@@ -57,6 +61,7 @@ model Threat {
   organization   Organization @relation(fields: [organizationId], references: [id])
   jiraTickets    JiraTicket[]
   assetLinks     ThreatAssetLink[]
+  notificationLogs NotificationLog[]
 
   @@index([organizationId, type])
   @@index([organizationId, severity])
@@ -169,4 +174,87 @@ model ThreatAssetLink {
   @@unique([threatId, assetId])
   @@index([threatId])
   @@index([assetId])
+}
+
+model NotificationPreference {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Channels enabled
+  emailEnabled   Boolean  @default(true)
+  slackEnabled   Boolean  @default(false)
+  teamsEnabled   Boolean  @default(false)
+  
+  // Email settings
+  email          String?
+  
+  // Slack settings
+  slackWebhook   String?
+  slackChannel   String?
+  
+  // Teams settings
+  teamsWebhook   String?
+  
+  // Trigger thresholds
+  minSeverity    String   @default("HIGH")  // CRITICAL, HIGH, MEDIUM, LOW
+  kevOnly        Boolean  @default(false)
+  assetMatchOnly Boolean  @default(false)
+  
+  // Digest mode
+  digestMode     String   @default("IMMEDIATE")  // IMMEDIATE, DAILY, WEEKLY
+  digestTime     String   @default("08:00")      // HH:MM format for daily/weekly digest
+  
+  // Quiet hours
+  quietHoursEnabled Boolean @default(false)
+  quietHoursStart   String?  // HH:MM format
+  quietHoursEnd     String?  // HH:MM format
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@index([userId])
+}
+
+model NotificationLog {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  type           String   // THREAT_ADDED, THREAT_STATUS_CHANGED, JIRA_TICKET_CREATED, ASSET_RISK_HIGH, etc.
+  channel        String   // EMAIL, SLACK, TEAMS, IN_APP
+  status         String   // PENDING, SENT, FAILED
+  
+  title          String
+  message        String
+  metadata       String?  // JSON string with additional context
+  
+  threatId       String?
+  threat         Threat?  @relation(fields: [threatId], references: [id], onDelete: SetNull)
+  
+  sentAt         DateTime?
+  failureReason  String?
+  
+  createdAt      DateTime @default(now())
+  digestQueues   DigestQueue[]
+  
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DigestQueue {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationLogId String
+  notificationLog   NotificationLog @relation(fields: [notificationLogId], references: [id], onDelete: Cascade)
+  scheduledFor   DateTime
+  processed      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  
+  @@index([userId, scheduledFor, processed])
 }
