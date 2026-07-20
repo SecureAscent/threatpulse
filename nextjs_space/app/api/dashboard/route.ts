@@ -8,12 +8,8 @@ export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    const orgId = user?.organizationId;
-    const emptyData = { total: 0, bySeverity: {}, byType: {}, byStatus: {}, bySource: {}, todayCount: 0, trendData: [], recentThreats: [] };
-    if (!orgId) return NextResponse.json(emptyData);
-
-    const threats = await prisma.threat.findMany({ where: { organizationId: orgId }, orderBy: { dateAdded: 'desc' } });
+    // Dashboard reflects the GLOBAL threat catalog shared by every org.
+    const threats = await prisma.threat.findMany({ orderBy: { dateAdded: 'desc' } });
     const total = threats?.length ?? 0;
 
     const bySeverity: Record<string, number> = {};

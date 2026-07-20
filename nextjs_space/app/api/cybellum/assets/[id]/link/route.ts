@@ -24,8 +24,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
     if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
 
-    const threat = await prisma.threat.findFirst({
-      where: { id: threatId, organizationId: orgId },
+    // Threat is global; only the asset must belong to the caller's org (checked above).
+    const threat = await prisma.threat.findUnique({
+      where: { id: threatId },
     });
     if (!threat) return NextResponse.json({ error: 'Threat not found' }, { status: 404 });
 

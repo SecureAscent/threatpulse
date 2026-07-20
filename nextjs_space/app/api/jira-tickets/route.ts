@@ -71,12 +71,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Required fields: threatId, title, priority' }, { status: 400 });
     }
 
-    // Ensure the threat belongs to the caller's organization.
-    const threat = await prisma.threat.findFirst({
-      where: { id: threatId, organizationId: orgId },
+    // Threats are a global catalog; any authenticated org may open a ticket against one.
+    const threat = await prisma.threat.findUnique({
+      where: { id: threatId },
       select: { id: true },
     });
-    if (!threat) return NextResponse.json({ error: 'Threat not found in your organization' }, { status: 404 });
+    if (!threat) return NextResponse.json({ error: 'Threat not found' }, { status: 404 });
 
     const ticket = await prisma.jiraTicket.create({
       data: {

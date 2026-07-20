@@ -8,17 +8,15 @@ export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    const orgId = user?.organizationId;
-    if (!orgId) return NextResponse.json({ threats: [] });
-
     const url = new URL(req.url);
     const type = url.searchParams.get('type');
     const severity = url.searchParams.get('severity');
     const status = url.searchParams.get('status');
     const search = url.searchParams.get('search');
 
-    const where: any = { organizationId: orgId };
+    // Threats are a GLOBAL shared catalog: every org sees the same CVE / KEV / NVD /
+    // RSS feed. Org isolation applies only to products, Jira tickets and asset links.
+    const where: any = {};
     if (type) where.type = type;
     if (severity) where.severity = severity;
     if (status) where.status = status;

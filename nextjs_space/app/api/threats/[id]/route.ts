@@ -9,11 +9,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = session.user as any;
-    const threat = await prisma.threat.findFirst({
-      where: { id: params?.id, organizationId: user?.organizationId },
+    const orgId = user?.organizationId;
+    // Threat itself is global; tickets and asset links stay scoped to the caller's org.
+    const threat = await prisma.threat.findUnique({
+      where: { id: params?.id },
       include: {
-        jiraTickets: { orderBy: { createdAt: 'desc' } },
+        jiraTickets: {
+          where: orgId ? { organizationId: orgId } : undefined,
+          orderBy: { createdAt: 'desc' },
+        },
         assetLinks: {
+          where: orgId ? { asset: { organizationId: orgId } } : undefined,
           include: { asset: true },
           orderBy: { createdAt: 'desc' },
         },
@@ -31,9 +37,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const user = session.user as any;
-    const existing = await prisma.threat.findFirst({
-      where: { id: params?.id, organizationId: user?.organizationId },
+    // Threat status/severity is shared across all orgs (global catalog).
+    const existing = await prisma.threat.findUnique({
+      where: { id: params?.id },
     });
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const body = await req.json();
@@ -60,8 +66,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = session.user as any;
     if (user?.role !== 'ADMIN' && user?.role !== 'SUPERADMIN') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-    const existing = await prisma.threat.findFirst({
-      where: { id: params?.id, organizationId: user?.organizationId },
+    const existing = await prisma.threat.findUnique({
+      where: { id: params?.id },
     });
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     await prisma.threat.delete({ where: { id: params?.id } });
