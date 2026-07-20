@@ -1,0 +1,117 @@
+name: Self-hosted Host Inspection
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to inspect
+        required: true
+        default: release/tenancy-platform-v1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: threatpulse-host-inspection
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    name: Inspect ThreatPulse Docker host
+    runs-on: self-hosted
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify repository context
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' '=== Repository ==='
+          pwd
+          git status --short --branch
+          git remote -v | sed -E 's#(https://)[^/@]+@#\1***@#g'
+          git log -1 --oneline --decorate
+
+      - name: Inspect host capabilities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' '=== Host ==='
+          uname -a
+          printf 'User: '; id
+          printf 'Disk:\n'; df -h .
+          printf 'Memory:\n'; free -h || true
+          printf '%s\n' '=== Tooling ==='
+          git --version
+          docker --version
+          docker compose version
+          make --version | head -n 1
+
+      - name: Validate production Compose definition safely
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f docker-compose.prod.yml
+          test -f Makefile
+          test -f .env.prod.example
+
+          printf '%s\n' '=== Compose services declared in repository ==='
+          if test -f .env.prod; then
+            docker compose --env-file .env.prod -f docker-compose.prod.yml config --services
+            printf '%s\n' '=== Compose images ==='
+            docker compose --env-file .env.prod -f docker-compose.prod.yml config --images
+          else
+            echo '.env.prod is not present in the runner workspace.'
+            echo 'Skipping interpolated Compose validation to avoid inventing credentials.'
+            awk '/^  [a-zA-Z0-9_-]+:$/ {gsub(":", "", $1); print $1}' docker-compose.prod.yml
+          fi
+
+      - name: Inspect current Docker state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' '=== Running and stopped containers ==='
+          docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+          printf '%s\n' '=== ThreatPulse containers ==='
+          docker ps -a --filter 'name=threatpulse-' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+          printf '%s\n' '=== Docker networks ==='
+          docker network ls --format 'table {{.Name}}\t{{.Driver}}\t{{.Scope}}'
+          printf '%s\n' '=== Docker volumes ==='
+          docker volume ls --format 'table {{.Name}}\t{{.Driver}}'
+
+      - name: Inspect ThreatPulse health without changing state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for container in threatpulse-postgres threatpulse-app threatpulse-collector threatpulse-nginx threatpulse-certbot; do
+            if docker container inspect "$container" >/dev/null 2>&1; then
+              status=$(docker inspect --format '{{.State.Status}}' "$container")
+              health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}' "$container")
+              restart_count=$(docker inspect --format '{{.RestartCount}}' "$container")
+              printf '%s status=%s health=%s restarts=%s\n' "$container" "$status" "$health" "$restart_count"
+            else
+              printf '%s not-found\n' "$container"
+            fi
+          done
+
+      - name: Show bounded recent logs
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for container in threatpulse-postgres threatpulse-app threatpulse-collector threatpulse-nginx; do
+            if docker container inspect "$container" >/dev/null 2>&1; then
+              printf '\n=== %s recent logs ===\n' "$container"
+              docker logs --tail 80 "$container" 2>&1 \
+                | sed -E 's#(postgres(ql)?://[^:[:space:]]+):[^@[:space:]]+@#\1:***@#g' \
+                | sed -E 's#(password|secret|token|api[_-]?key)([=:][[:space:]]*)[^[:space:]]+#\1\2***#Ig'
+            fi
+          done
