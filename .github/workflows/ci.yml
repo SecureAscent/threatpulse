@@ -19,7 +19,21 @@ jobs:
   application:
     name: Application validation
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: threatpulse
+          POSTGRES_PASSWORD: threatpulse
+          POSTGRES_DB: threatpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U threatpulse -d threatpulse"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: nextjs_space
@@ -52,6 +66,12 @@ jobs:
 
       - name: Generate Prisma client
         run: yarn db:generate
+
+      - name: Apply migrations to clean PostgreSQL
+        run: yarn prisma migrate deploy --schema=./prisma/schema.prisma
+
+      - name: Verify migration status
+        run: yarn prisma migrate status --schema=./prisma/schema.prisma
 
       - name: Run tenancy tests
         run: yarn test:tenancy
