@@ -17,6 +17,8 @@ model Organization {
   users              User[]
   threats            Threat[]
   integrationConfigs IntegrationConfig[]
+  jiraTickets        JiraTicket[]
+  cybellumAssets     CybellumAsset[]
 }
 
 model User {
@@ -53,6 +55,8 @@ model Threat {
   lastUpdated    DateTime     @updatedAt
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
+  jiraTickets    JiraTicket[]
+  assetLinks     ThreatAssetLink[]
 
   @@index([organizationId, type])
   @@index([organizationId, severity])
@@ -106,4 +110,63 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model JiraTicket {
+  id             String   @id @default(cuid())
+  threatId       String
+  threat         Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  jiraKey        String?  // e.g. "SEC-123" - null until actually created in Jira
+  title          String
+  description    String
+  priority       String   // Critical, High, Medium, Low
+  status         String   @default("DRAFT") // DRAFT, CREATED, IN_PROGRESS, RESOLVED, CLOSED
+  affectedPackage String?
+  affectedProduct String?
+  productOwner   String?
+  cvssScore      Float?
+  cveId          String?
+  remediationSteps String?
+  notes          String?
+  createdBy      String   // user email
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([organizationId])
+  @@index([threatId])
+}
+
+model CybellumAsset {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  cybellumId     String?  // ID in Cybellum system (null = manually entered)
+  productName    String
+  productVersion String?
+  packageName    String?
+  packageVersion String?
+  productOwner   String?
+  ownerEmail     String?
+  department     String?
+  riskScore      Float?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  threatLinks    ThreatAssetLink[]
+  @@index([organizationId])
+}
+
+model ThreatAssetLink {
+  id             String        @id @default(cuid())
+  threatId       String
+  threat         Threat        @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  assetId        String
+  asset          CybellumAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  linkedBy       String        // user email
+  notes          String?
+  createdAt      DateTime      @default(now())
+  @@unique([threatId, assetId])
+  @@index([threatId])
+  @@index([assetId])
 }

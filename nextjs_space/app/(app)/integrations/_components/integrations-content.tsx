@@ -39,8 +39,8 @@ const feedSources = [
 /* ─── Service Integrations ─── */
 const serviceIntegrations = [
   {
-    id: 'jira', name: 'Jira', description: 'Create and search security tickets via REST API v3',
-    icon: Ticket, category: 'ticketing',
+    id: 'jira', name: 'Jira', description: 'Create and search security tickets via REST API v3. Requires a Jira Cloud URL, service account email, and an API token before tickets can be pushed automatically.',
+    icon: Ticket, category: 'ticketing', pendingApproval: true,
     fields: [
       { key: 'JIRA_URL', label: 'Jira URL', placeholder: 'https://company.atlassian.net' },
       { key: 'JIRA_EMAIL', label: 'Jira Email', placeholder: 'user@company.com' },
@@ -48,8 +48,8 @@ const serviceIntegrations = [
     ],
   },
   {
-    id: 'cybellum', name: 'Cybellum', description: 'Cross-reference CVEs against SBOM and product catalog',
-    icon: Database, category: 'sbom',
+    id: 'cybellum', name: 'Cybellum', description: 'Cross-reference CVEs against SBOM and product catalog. Requires your Cybellum instance base URL and an API key to auto-sync products, packages, and asset risk scores.',
+    icon: Database, category: 'sbom', pendingApproval: true,
     fields: [
       { key: 'CYBELLUM_BASE_URL', label: 'Base URL', placeholder: 'https://your-instance.cybellum.io' },
       { key: 'CYBELLUM_API_KEY', label: 'API Key', placeholder: 'Your Cybellum API key', secret: true },
@@ -583,19 +583,37 @@ export default function IntegrationsContent() {
                         <Icon className="w-4 h-4 text-primary" />
                         {svc.name}
                       </CardTitle>
-                      <Badge className={`text-[10px] font-mono ${
-                        status === 'connected' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                        status === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                        'bg-muted text-muted-foreground border-border/50'
-                      }`}>
-                        {status === 'connected' && <CheckCircle className="w-3 h-3 mr-1" />}
-                        {status === 'error' && <XCircle className="w-3 h-3 mr-1" />}
-                        {status.toUpperCase()}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        {(svc as any).pendingApproval && (
+                          <Badge className="text-[10px] font-mono bg-amber-500/10 text-amber-500 border-amber-500/20">
+                            <Clock className="w-3 h-3 mr-1" />
+                            PENDING APPROVAL
+                          </Badge>
+                        )}
+                        <Badge className={`text-[10px] font-mono ${
+                          status === 'connected' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
+                          status === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                          'bg-muted text-muted-foreground border-border/50'
+                        }`}>
+                          {status === 'connected' && <CheckCircle className="w-3 h-3 mr-1" />}
+                          {status === 'error' && <XCircle className="w-3 h-3 mr-1" />}
+                          {status.toUpperCase()}
+                        </Badge>
+                      </div>
                     </div>
                     <p className="text-xs text-muted-foreground">{svc.description}</p>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {(svc as any).pendingApproval && (
+                      <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                        <Clock className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 leading-relaxed">
+                          Integration approval pending. The API key has not been provisioned yet — ThreatPulse works
+                          fully offline in the meantime (drafts &amp; manual entries). Enter the credentials below and
+                          save to activate once approved. <span className="font-medium">Configure when ready →</span>
+                        </p>
+                      </div>
+                    )}
                     {svc.fields.map(field => (
                       <div key={field.key} className="space-y-1.5">
                         <Label className="text-xs font-mono">{field.label}</Label>

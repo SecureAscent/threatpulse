@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Filter, AlertTriangle, Bug, Crosshair, Activity, ChevronRight, X, Plus } from 'lucide-react';
+import { Search, Filter, AlertTriangle, Bug, Crosshair, Activity, ChevronRight, X, Plus, ArrowUpDown } from 'lucide-react';
 import { FadeIn } from '@/components/ui/animate';
 import type { ThreatItem } from '@/lib/types';
+import { computeRiskScore, riskScoreBadgeClass } from '@/lib/risk-score';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -41,6 +42,19 @@ export default function ThreatsContent() {
   const [severityFilter, setSeverityFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [addOpen, setAddOpen] = useState(false);
+  const [sortByRisk, setSortByRisk] = useState<'none' | 'desc' | 'asc'>('none');
+
+  const toggleRiskSort = () => setSortByRisk((prev) => (prev === 'none' ? 'desc' : prev === 'desc' ? 'asc' : 'none'));
+
+  const displayedThreats = (() => {
+    const list = [...(threats ?? [])];
+    if (sortByRisk === 'none') return list;
+    return list.sort((a, b) => {
+      const ra = computeRiskScore({ cvssScore: a?.cvssScore, severity: a?.severity, source: a?.source });
+      const rb = computeRiskScore({ cvssScore: b?.cvssScore, severity: b?.severity, source: b?.source });
+      return sortByRisk === 'desc' ? rb - ra : ra - rb;
+    });
+  })();
 
   const fetchThreats = useCallback(async () => {
     try {
@@ -161,6 +175,17 @@ export default function ThreatsContent() {
                       <TableHead>Title</TableHead>
                       <TableHead className="w-[80px]">Type</TableHead>
                       <TableHead className="w-[100px]">Severity</TableHead>
+                      <TableHead className="w-[110px]">
+                        <button
+                          type="button"
+                          onClick={toggleRiskSort}
+                          className="flex items-center gap-1 hover:text-foreground transition-colors"
+                          title="ThreatPulse Risk Score"
+                        >
+                          Risk Score
+                          <ArrowUpDown className={`w-3 h-3 ${sortByRisk !== 'none' ? 'text-primary' : 'text-muted-foreground'}`} />
+                        </button>
+                      </TableHead>
                       <TableHead className="w-[120px]">Status</TableHead>
                       <TableHead className="w-[160px]">Affected Assets</TableHead>
                       <TableHead className="w-[100px]">Date</TableHead>
@@ -168,8 +193,9 @@ export default function ThreatsContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(threats ?? []).map((threat: ThreatItem) => {
+                    {(displayedThreats ?? []).map((threat: ThreatItem) => {
                       const TypeIcon = typeIcons[threat?.type] ?? Bug;
+                      const riskScore = computeRiskScore({ cvssScore: threat?.cvssScore, severity: threat?.severity, source: threat?.source });
                       return (
                         <TableRow key={threat?.id} className="cursor-pointer hover:bg-muted/30">
                           <TableCell className="font-mono text-xs text-primary">{threat?.threatId ?? ''}</TableCell>
@@ -183,6 +209,11 @@ export default function ThreatsContent() {
                           <TableCell>
                             <Badge variant="outline" className={`text-[10px] ${severityBadge[threat?.severity] ?? ''}`}>
                               {threat?.severity ?? ''}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] font-mono ${riskScoreBadgeClass(riskScore)}`}>
+                              {riskScore.toFixed(1)}
                             </Badge>
                           </TableCell>
                           <TableCell>

@@ -11,6 +11,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const user = session.user as any;
     const threat = await prisma.threat.findFirst({
       where: { id: params?.id, organizationId: user?.organizationId },
+      include: {
+        jiraTickets: { orderBy: { createdAt: 'desc' } },
+        assetLinks: {
+          include: { asset: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
     if (!threat) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ threat });

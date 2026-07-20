@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   Shield, LayoutDashboard, AlertTriangle, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
-  FileText, HelpCircle, Plug, Briefcase, BookOpen
+  FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -16,6 +16,7 @@ const userItems = [
   { href: '/cve-database', label: 'CVE Database', icon: Bug },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/product-portfolio', label: 'Product Portfolio', icon: Package },
+  { href: '/jira-tickets', label: 'Jira Tickets', icon: Ticket },
   { href: '/threat-feed', label: 'Threat Feed', icon: Rss },
 ];
 
