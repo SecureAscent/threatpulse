@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -16,6 +17,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  repository-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reject tracked dependency and build output
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tracked=$(git ls-files | grep -E '(^|/)(node_modules|\.next|dist|coverage)(/|$)' || true)
+          if [ -n "$tracked" ]; then
+            echo 'Generated dependency or build output is still tracked:'
+            printf '%s\n' "$tracked" | head -n 200
+            exit 1
+          fi
+
+      - name: Reject committed production environment files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tracked=$(git ls-files | grep -E '(^|/)\.env\.prod$' || true)
+          if [ -n "$tracked" ]; then
+            echo 'Production environment files must not be committed:'
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+
   application:
     name: Application validation
     runs-on: ubuntu-latest
