@@ -91,10 +91,11 @@ services:
     image: nginx:alpine
     container_name: threatpulse-nginx
     environment:
-      - DOMAIN=${DOMAIN}
+      DOMAIN: ${DOMAIN}
+      PORTAINER_HOSTNAME: ${PORTAINER_HOSTNAME:-portainer.chaugen.duckdns.org}
     ports:
-      - "8181:80"
-      - "3000:443"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/templates:/etc/nginx/templates:ro
@@ -105,7 +106,8 @@ services:
     restart: unless-stopped
     networks:
       - threatpulse-net
-    # Reload nginx every 6h so renewed certificates are picked up.
+      - threatpulse-proxy
+    # Reload nginx after certificate renewal or configuration changes.
 
   # ── Certbot (Let's Encrypt) ────────────────────────────────────────────────
   certbot:
@@ -128,3 +130,6 @@ volumes:
 networks:
   threatpulse-net:
     driver: bridge
+  threatpulse-proxy:
+    external: true
+    name: threatpulse-proxy

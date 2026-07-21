@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
+import { writeAuditEvent } from '@/lib/audit';
+import { normalizeAppRole } from '@/lib/rbac';
 
 type AdminSessionUser = {
   id: string;
@@ -14,6 +16,16 @@ async function getAdminUser(): Promise<AdminSessionUser | null> {
   const user = session?.user as AdminSessionUser | undefined;
   if (!user || !['ADMIN', 'SUPERADMIN'].includes(user.role)) return null;
   return user;
+}
+
+function auditContext(admin: AdminSessionUser, organizationId: string, departmentId?: string | null) {
+  return {
+    userId: admin.id,
+    role: normalizeAppRole(admin.role),
+    organizationId,
+    departmentId: departmentId ?? null,
+    parentOrganizationId: null,
+  };
 }
 
 function slugify(name: string, fallback: string): string {
@@ -180,7 +192,7 @@ export async function POST(request: Request) {
       if (admin.role !== 'SUPERADMIN') return NextResponse.json({ error: 'Super administrator access required' }, { status: 403 });
       if (!normalizedName) return NextResponse.json({ error: 'Organization name is required' }, { status: 400 });
       if (!parentOrganizationId) return NextResponse.json({ error: 'Parent organization is required' }, { status: 400 });
-      const parent = await prisma.parentOrganization.findUnique({ where: { id: parentOrganizationId }, select: { id: true } });
+      const parent = await prisma.parentOrganization.findUnique({ where: { id: parentOrganizationId }, select: { id: true, name: true } });
       if (!parent) return NextResponse.json({ error: 'Parent organization not found' }, { status: 404 });
       const organization = await prisma.organization.create({
         data: {
@@ -199,6 +211,15 @@ export async function POST(request: Request) {
           _count: { select: { users: true, threats: true, departments: true } },
         },
       });
+
+      await writeAuditEvent({
+        context: auditContext(admin, organization.id),
+        action: 'organization.create',
+        entityType: 'Organization',
+        entityId: organization.id,
+        metadata: { name: organization.name, slug: organization.slug, parentOrganizationId, parentOrganizationName: parent.name },
+      });
+
       return NextResponse.json({ organization }, { status: 201 });
     }
 
@@ -206,7 +227,7 @@ export async function POST(request: Request) {
       if (!normalizedName) return NextResponse.json({ error: 'Department name is required' }, { status: 400 });
       const targetOrganizationId = admin.role === 'SUPERADMIN' ? organizationId : admin.organizationId;
       if (!targetOrganizationId) return NextResponse.json({ error: 'Organization is required' }, { status: 400 });
-      const organization = await prisma.organization.findUnique({ where: { id: targetOrganizationId }, select: { id: true } });
+      const organization = await prisma.organization.findUnique({ where: { id: targetOrganizationId }, select: { id: true, name: true } });
       if (!organization) return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       const department = await prisma.department.create({
         data: {
@@ -216,18 +237,34 @@ export async function POST(request: Request) {
         },
         select: { id: true, name: true, slug: true, organizationId: true, _count: { select: { users: true, threats: true } } },
       });
+
+      await writeAuditEvent({
+        context: auditContext(admin, targetOrganizationId, department.id),
+        action: 'department.create',
+        entityType: 'Department',
+        entityId: department.id,
+        departmentId: department.id,
+        metadata: { name: department.name, slug: department.slug, organizationName: organization.name },
+      });
+
       return NextResponse.json({ department }, { status: 201 });
     }
 
     if (action === 'assignUser') {
       if (admin.role !== 'SUPERADMIN') return NextResponse.json({ error: 'Only super administrators can reassign users' }, { status: 403 });
       if (!userId || !organizationId) return NextResponse.json({ error: 'userId and organizationId are required' }, { status: 400 });
-      const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
+      const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true } });
       if (!organization) return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       if (departmentId) {
         const department = await prisma.department.findFirst({ where: { id: departmentId, organizationId }, select: { id: true } });
         if (!department) return NextResponse.json({ error: 'Department does not belong to the selected organization' }, { status: 400 });
       }
+      const before = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, organizationId: true, departmentId: true },
+      });
+      if (!before) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
       const user = await prisma.user.update({
         where: { id: userId },
         data: { organizationId, departmentId: departmentId || null },
@@ -242,6 +279,21 @@ export async function POST(request: Request) {
           department: { select: { id: true, name: true, slug: true } },
         },
       });
+
+      await writeAuditEvent({
+        context: auditContext(admin, organizationId, user.departmentId),
+        action: 'user.reassign',
+        entityType: 'User',
+        entityId: user.id,
+        departmentId: user.departmentId,
+        metadata: {
+          email: user.email,
+          before: { organizationId: before.organizationId, departmentId: before.departmentId },
+          after: { organizationId: user.organizationId, departmentId: user.departmentId },
+          organizationName: organization.name,
+        },
+      });
+
       return NextResponse.json({ user });
     }
 

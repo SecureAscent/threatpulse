@@ -1,8 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { Building2, Network, Plus, Users, AlertTriangle } from 'lucide-react';
+import { Building2, Network, Plus, Users, AlertTriangle, Settings2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,7 +76,7 @@ export default function OrgContent() {
     }
     return (
       <div className="p-6 space-y-6 max-w-[1000px] mx-auto">
-        <FadeIn><div><h1 className="text-2xl font-display font-bold tracking-tight">Organization Hierarchy</h1><p className="text-sm text-muted-foreground mt-1">{sessionUser?.parentOrganizationName ? `${sessionUser.parentOrganizationName} / ` : ''}{organization.name}</p></div></FadeIn>
+        <FadeIn><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-2xl font-display font-bold tracking-tight">Organization Hierarchy</h1><p className="text-sm text-muted-foreground mt-1">{sessionUser?.parentOrganizationName ? `${sessionUser.parentOrganizationName} / ` : ''}{organization.name}</p></div><Button asChild variant="outline"><Link href="/admin/organization/departments"><Settings2 className="w-4 h-4 mr-2" />Manage Departments</Link></Button></div></FadeIn>
         <div className="grid sm:grid-cols-3 gap-4">
           <Metric label="Departments" value={organization._count?.departments ?? organization.departments?.length ?? 0} icon={Network} />
           <Metric label="Members" value={organization._count?.users ?? 0} icon={Users} />
@@ -88,7 +89,7 @@ export default function OrgContent() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
-      <FadeIn><div><h1 className="text-2xl font-display font-bold tracking-tight">Organization Hierarchy</h1><p className="text-sm text-muted-foreground mt-1">Manage parent organizations, organizations, and departments.</p></div></FadeIn>
+      <FadeIn><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-2xl font-display font-bold tracking-tight">Organization Hierarchy</h1><p className="text-sm text-muted-foreground mt-1">Manage parent organizations, organizations, and departments.</p></div><Button asChild variant="outline"><Link href="/admin/organization/departments"><Settings2 className="w-4 h-4 mr-2" />Manage Departments</Link></Button></div></FadeIn>
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card>

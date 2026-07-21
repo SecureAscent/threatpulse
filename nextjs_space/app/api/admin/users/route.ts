@@ -3,24 +3,47 @@ import { prisma } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { canManageRole, hasPermission, isAppRole, normalizeAppRole } from '@/lib/rbac';
+import { writeAuditEvent } from '@/lib/audit';
 
-const MANAGEABLE_ROLES = ['ADMIN', 'ANALYST'] as const;
+const MANAGEABLE_ROLES = [
+  'VIEWER',
+  'ANALYST',
+  'DEPARTMENT_ADMIN',
+  'ADMIN',
+  'PARENT_ADMIN',
+] as const;
+
+type ManageableRole = (typeof MANAGEABLE_ROLES)[number];
 
 type AdminSessionUser = {
   id: string;
   role: string;
   organizationId: string | null;
+  departmentId: string | null;
+  parentOrganizationId: string | null;
+  accessRevoked?: boolean;
 };
 
 async function getAdminUser(): Promise<AdminSessionUser | null> {
   const session = await getServerSession(authOptions);
   const user = session?.user as AdminSessionUser | undefined;
-  if (!user || !['ADMIN', 'SUPERADMIN'].includes(user.role)) return null;
+  if (!user || user.accessRevoked || !hasPermission(user.role, 'users.manage')) return null;
   return user;
 }
 
 function unauthorized() {
   return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+}
+
+function auditContext(admin: AdminSessionUser, organizationId: string, departmentId?: string | null) {
+  return {
+    userId: admin.id,
+    role: normalizeAppRole(admin.role),
+    organizationId,
+    departmentId: departmentId ?? null,
+    parentOrganizationId: admin.parentOrganizationId,
+  };
 }
 
 const userSelect = {
@@ -35,10 +58,60 @@ const userSelect = {
   createdAt: true,
 } as const;
 
-async function validateDepartment(organizationId: string, departmentId?: string | null) {
+function isManageableRole(role: unknown): role is ManageableRole {
+  return isAppRole(role) && MANAGEABLE_ROLES.includes(role as ManageableRole);
+}
+
+function actorOrganizationScope(admin: AdminSessionUser) {
+  const role = normalizeAppRole(admin.role);
+  if (role === 'SUPERADMIN') return {};
+  if (role === 'PARENT_ADMIN' && admin.parentOrganizationId) {
+    return { parentOrganizationId: admin.parentOrganizationId };
+  }
+  return { id: admin.organizationId ?? '__missing_organization__' };
+}
+
+function actorUserScope(admin: AdminSessionUser) {
+  const role = normalizeAppRole(admin.role);
+  if (role === 'SUPERADMIN') return {};
+  if (role === 'PARENT_ADMIN' && admin.parentOrganizationId) {
+    return { organization: { parentOrganizationId: admin.parentOrganizationId } };
+  }
+  if (role === 'DEPARTMENT_ADMIN') {
+    return {
+      organizationId: admin.organizationId ?? '__missing_organization__',
+      departmentId: admin.departmentId ?? '__missing_department__',
+    };
+  }
+  return { organizationId: admin.organizationId ?? '__missing_organization__' };
+}
+
+async function validateOrganization(admin: AdminSessionUser, organizationId: string) {
+  return prisma.organization.findFirst({
+    where: {
+      id: organizationId,
+      archivedAt: null,
+      ...actorOrganizationScope(admin),
+    },
+    select: { id: true, parentOrganizationId: true },
+  });
+}
+
+async function validateDepartment(
+  admin: AdminSessionUser,
+  organizationId: string,
+  departmentId?: string | null,
+) {
   if (!departmentId) return true;
+  if (normalizeAppRole(admin.role) === 'DEPARTMENT_ADMIN' && departmentId !== admin.departmentId) {
+    return false;
+  }
   return Boolean(await prisma.department.findFirst({
-    where: { id: departmentId, organizationId },
+    where: {
+      id: departmentId,
+      organizationId,
+      archivedAt: null,
+    },
     select: { id: true },
   }));
 }
@@ -47,14 +120,19 @@ export async function GET() {
   try {
     const admin = await getAdminUser();
     if (!admin) return unauthorized();
-    if (admin.role !== 'SUPERADMIN' && !admin.organizationId) return NextResponse.json({ users: [] });
 
     const users = await prisma.user.findMany({
-      where: admin.role === 'SUPERADMIN' ? undefined : { organizationId: admin.organizationId },
+      where: {
+        ...actorUserScope(admin),
+        NOT: { id: admin.id },
+      },
       select: userSelect,
       orderBy: { createdAt: 'desc' },
     });
-    return NextResponse.json({ users });
+
+    return NextResponse.json({
+      users: users.filter((user) => canManageRole(admin.role, user.role)),
+    });
   } catch (error) {
     console.error('[USERS_GET_ERROR]', error);
     return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
@@ -71,17 +149,29 @@ export async function POST(req: Request) {
     if (!name?.trim() || !email?.trim() || !password) {
       return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
     }
-    if (!MANAGEABLE_ROLES.includes(role)) {
+    if (!isManageableRole(role)) {
       return NextResponse.json({ message: 'Invalid role' }, { status: 400 });
     }
+    if (!canManageRole(admin.role, role)) {
+      return NextResponse.json({ message: 'You cannot create a user with that role' }, { status: 403 });
+    }
 
-    const targetOrganizationId = admin.role === 'SUPERADMIN' ? organizationId : admin.organizationId;
-    if (!targetOrganizationId) return NextResponse.json({ message: 'Organization is required' }, { status: 400 });
+    const actorRole = normalizeAppRole(admin.role);
+    const targetOrganizationId = actorRole === 'SUPERADMIN' || actorRole === 'PARENT_ADMIN'
+      ? String(organizationId || admin.organizationId || '')
+      : String(admin.organizationId || '');
+    if (!targetOrganizationId) {
+      return NextResponse.json({ message: 'Organization is required' }, { status: 400 });
+    }
+    if (!(await validateOrganization(admin, targetOrganizationId))) {
+      return NextResponse.json({ message: 'Organization not found, archived, or outside your scope' }, { status: 404 });
+    }
 
-    const organization = await prisma.organization.findUnique({ where: { id: targetOrganizationId }, select: { id: true } });
-    if (!organization) return NextResponse.json({ message: 'Organization not found' }, { status: 404 });
-    if (!(await validateDepartment(targetOrganizationId, departmentId))) {
-      return NextResponse.json({ message: 'Department does not belong to the selected organization' }, { status: 400 });
+    const targetDepartmentId = actorRole === 'DEPARTMENT_ADMIN'
+      ? admin.departmentId
+      : (departmentId || null);
+    if (!(await validateDepartment(admin, targetOrganizationId, targetDepartmentId))) {
+      return NextResponse.json({ message: 'Department not found, archived, or outside your scope' }, { status: 400 });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -96,10 +186,20 @@ export async function POST(req: Request) {
         password: await hash(password, 12),
         role,
         organizationId: targetOrganizationId,
-        departmentId: departmentId || null,
+        departmentId: targetDepartmentId,
       },
       select: userSelect,
     });
+
+    await writeAuditEvent({
+      context: auditContext(admin, targetOrganizationId, user.departmentId),
+      action: 'user.create',
+      entityType: 'User',
+      entityId: user.id,
+      departmentId: user.departmentId,
+      metadata: { email: user.email, role: user.role },
+    });
+
     return NextResponse.json({ message: 'User created successfully', user }, { status: 201 });
   } catch (error) {
     console.error('[USERS_POST_ERROR]', error);
@@ -117,42 +217,76 @@ export async function PATCH(req: Request) {
     if (!userId || (!role && organizationId === undefined && departmentId === undefined)) {
       return NextResponse.json({ message: 'No changes supplied' }, { status: 400 });
     }
-    if (role && !MANAGEABLE_ROLES.includes(role)) {
+    if (userId === admin.id) {
+      return NextResponse.json({ message: 'You cannot modify your own authorization assignment' }, { status: 400 });
+    }
+    if (role && !isManageableRole(role)) {
       return NextResponse.json({ message: 'Invalid role' }, { status: 400 });
     }
 
     const target = await prisma.user.findFirst({
-      where: admin.role === 'SUPERADMIN' ? { id: userId } : { id: userId, organizationId: admin.organizationId },
-      select: { id: true, role: true, organizationId: true },
+      where: { id: userId, ...actorUserScope(admin) },
+      select: { id: true, email: true, role: true, organizationId: true, departmentId: true },
     });
     if (!target) return NextResponse.json({ message: 'User not found' }, { status: 404 });
-    if (target.role === 'SUPERADMIN' && admin.role !== 'SUPERADMIN') {
-      return NextResponse.json({ message: 'Cannot modify a super administrator' }, { status: 403 });
+    if (!canManageRole(admin.role, target.role)) {
+      return NextResponse.json({ message: 'You cannot modify a user with that role' }, { status: 403 });
     }
-    if (organizationId !== undefined && admin.role !== 'SUPERADMIN') {
-      return NextResponse.json({ message: 'Only super administrators can move users between organizations' }, { status: 403 });
+    if (role && !canManageRole(admin.role, role)) {
+      return NextResponse.json({ message: 'You cannot assign that role' }, { status: 403 });
+    }
+
+    const actorRole = normalizeAppRole(admin.role);
+    if (organizationId !== undefined && !['SUPERADMIN', 'PARENT_ADMIN'].includes(actorRole)) {
+      return NextResponse.json({ message: 'You cannot move users between organizations' }, { status: 403 });
     }
 
     const resultingOrganizationId = organizationId !== undefined
-      ? (organizationId || null)
-      : target.organizationId;
-    if (resultingOrganizationId && !(await validateDepartment(resultingOrganizationId, departmentId))) {
-      return NextResponse.json({ message: 'Department does not belong to the selected organization' }, { status: 400 });
+      ? String(organizationId || '')
+      : String(target.organizationId || '');
+    if (!resultingOrganizationId) {
+      return NextResponse.json({ message: 'Organization is required' }, { status: 400 });
     }
-    if (!resultingOrganizationId && departmentId) {
-      return NextResponse.json({ message: 'An organization is required when assigning a department' }, { status: 400 });
+    if (!(await validateOrganization(admin, resultingOrganizationId))) {
+      return NextResponse.json({ message: 'Organization not found, archived, or outside your scope' }, { status: 404 });
+    }
+
+    const resultingDepartmentId = actorRole === 'DEPARTMENT_ADMIN'
+      ? admin.departmentId
+      : departmentId !== undefined
+        ? (departmentId || null)
+        : organizationId !== undefined
+          ? null
+          : target.departmentId;
+    if (!(await validateDepartment(admin, resultingOrganizationId, resultingDepartmentId))) {
+      return NextResponse.json({ message: 'Department not found, archived, or outside your scope' }, { status: 400 });
     }
 
     const user = await prisma.user.update({
       where: { id: userId },
       data: {
         ...(role ? { role } : {}),
-        ...(organizationId !== undefined ? { organizationId: organizationId || null } : {}),
-        ...(departmentId !== undefined ? { departmentId: departmentId || null } : {}),
-        ...(organizationId !== undefined && !departmentId ? { departmentId: null } : {}),
+        ...(organizationId !== undefined ? { organizationId: resultingOrganizationId } : {}),
+        ...(departmentId !== undefined || organizationId !== undefined
+          ? { departmentId: resultingDepartmentId }
+          : {}),
       },
       select: userSelect,
     });
+
+    await writeAuditEvent({
+      context: auditContext(admin, resultingOrganizationId, user.departmentId),
+      action: 'user.update',
+      entityType: 'User',
+      entityId: user.id,
+      departmentId: user.departmentId,
+      metadata: {
+        email: user.email,
+        before: { role: target.role, organizationId: target.organizationId, departmentId: target.departmentId },
+        after: { role: user.role, organizationId: user.organizationId, departmentId: user.departmentId },
+      },
+    });
+
     return NextResponse.json({ message: 'User updated successfully', user });
   } catch (error) {
     console.error('[USERS_PATCH_ERROR]', error);
@@ -169,14 +303,27 @@ export async function DELETE(req: Request) {
     if (admin.id === userId) return NextResponse.json({ message: 'You cannot delete your own account' }, { status: 400 });
 
     const target = await prisma.user.findFirst({
-      where: admin.role === 'SUPERADMIN' ? { id: userId } : { id: userId, organizationId: admin.organizationId },
-      select: { id: true, role: true },
+      where: { id: userId, ...actorUserScope(admin) },
+      select: { id: true, email: true, role: true, organizationId: true, departmentId: true },
     });
     if (!target) return NextResponse.json({ message: 'User not found' }, { status: 404 });
-    if (target.role === 'SUPERADMIN' && admin.role !== 'SUPERADMIN') {
-      return NextResponse.json({ message: 'Cannot delete a super administrator' }, { status: 403 });
+    if (!canManageRole(admin.role, target.role)) {
+      return NextResponse.json({ message: 'You cannot delete a user with that role' }, { status: 403 });
     }
+
     await prisma.user.delete({ where: { id: userId } });
+
+    if (target.organizationId) {
+      await writeAuditEvent({
+        context: auditContext(admin, target.organizationId, target.departmentId),
+        action: 'user.delete',
+        entityType: 'User',
+        entityId: target.id,
+        departmentId: target.departmentId,
+        metadata: { email: target.email, role: target.role },
+      });
+    }
+
     return NextResponse.json({ message: 'User deleted successfully' });
   } catch (error) {
     console.error('[USERS_DELETE_ERROR]', error);
