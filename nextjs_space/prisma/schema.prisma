@@ -9,17 +9,20 @@ datasource db {
 }
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  setupCompleted Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   users              User[]
   threats            Threat[]
   integrationConfigs IntegrationConfig[]
   jiraTickets        JiraTicket[]
   cybellumAssets     CybellumAsset[]
   notificationLogs   NotificationLog[]
+  apiKeys            ApiKey[]
+  auditLogs          AuditLog[]
 }
 
 model User {
@@ -39,6 +42,11 @@ model User {
   notificationPreference NotificationPreference?
   notificationLogs       NotificationLog[]
   digestQueue            DigestQueue[]
+  mfaSecret              MfaSecret?
+  passwordResetTokens    PasswordResetToken[]
+  apiKeys                ApiKey[]             @relation("ApiKeyCreatedBy")
+  activeSessions         ActiveSession[]
+  auditLogs              AuditLog[]
 }
 
 model Threat {
@@ -257,4 +265,84 @@ model DigestQueue {
   createdAt      DateTime @default(now())
   
   @@index([userId, scheduledFor, processed])
+}
+
+
+// ---------------------------------------------------------------------------
+// Security & Admin Hardening (Track C)
+// ---------------------------------------------------------------------------
+
+model MfaSecret {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  secret      String   // TOTP secret (base32). Encrypt at rest in a future iteration.
+  verified    Boolean  @default(false)
+  backupCodes String[] // SHA-256 hashes of one-time backup codes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique // SHA-256 of the raw token
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User         @relation("ApiKeyCreatedBy", fields: [createdById], references: [id])
+  name           String
+  keyPrefix      String   // e.g. "tp_live_ab12cd34" (safe to display)
+  keyHash        String   @unique // SHA-256 of the full key
+  scopes         String[] // e.g. ["threats.read", "threats.manage"]
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId])
+}
+
+model ActiveSession {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionToken String    @unique
+  userAgent    String?
+  ipAddress    String?
+  lastSeenAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actorEmail     String?  // denormalized so the trail survives user deletion
+  action         String   // e.g. "mfa.enabled", "apikey.created", "session.revoked"
+  targetType     String?  // e.g. "ApiKey", "User", "Threat"
+  targetId       String?
+  metadata       String?  // JSON string with additional context
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
 }

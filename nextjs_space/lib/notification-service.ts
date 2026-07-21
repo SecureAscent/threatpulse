@@ -37,9 +37,9 @@ export async function checkShouldNotify(
 ): Promise<boolean> {
   // Fetch preferences if not provided
   if (!prefs) {
-    prefs = await db.notificationPreference.findUnique({
+    prefs = (await db.notificationPreference.findUnique({
       where: { userId },
-    });
+    })) ?? undefined;
   }
 
   // No preferences = no notifications
@@ -256,7 +256,7 @@ export async function sendDigest(userId: string) {
   // Send digest for each channel
   for (const [channel, digests] of Object.entries(byChannel)) {
     const title = `ThreatPulse Digest: ${digests.length} notifications`;
-    const message = digests.map(d => `• ${d.notificationLog.title}`).join('\n');
+    const message = digests.map((d: any) => `• ${d.notificationLog.title}`).join('\n');
     
     // Send via appropriate channel (using first notification's user prefs)
     await sendNotification(digests[0].notificationLog.id);
@@ -264,7 +264,7 @@ export async function sendDigest(userId: string) {
 
   // Mark as processed
   await db.digestQueue.updateMany({
-    where: { id: { in: pendingDigests.map(d => d.id) } },
+    where: { id: { in: pendingDigests.map((d: any) => d.id) } },
     data: { processed: true },
   });
 

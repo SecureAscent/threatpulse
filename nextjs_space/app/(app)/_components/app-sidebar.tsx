@@ -5,7 +5,8 @@ import Link from 'next/link';
 import {
   Shield, LayoutDashboard, AlertTriangle, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
-  FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell
+  FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell,
+  KeySquare, ListChecks, ShieldCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -24,9 +25,12 @@ const userItems = [
 const adminItems = [
   { href: '/actioned-threats', label: 'Actioned Threats', icon: CheckSquare },
   { href: '/admin', label: 'Admin', icon: Settings },
+  { href: '/admin/api-keys', label: 'API Keys', icon: KeySquare },
+  { href: '/admin/setup', label: 'Setup Checklist', icon: ListChecks },
 ];
 
 const settingsItems = [
+  { href: '/settings/security', label: 'Security', icon: ShieldCheck },
   { href: '/settings/notifications', label: 'Notifications', icon: Bell },
   { href: '/integrations', label: 'Integrations', icon: Plug },
 ];
@@ -70,7 +74,7 @@ export default function AppSidebar() {
   const pathname = usePathname();
   const { data: session } = useSession() || {};
   const user = session?.user as any;
-  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN' || user?.role === 'PARENT_ADMIN';
 
   return (
     <aside className={cn(

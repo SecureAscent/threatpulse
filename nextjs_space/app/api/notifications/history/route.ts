@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       notifications,
       total,
-      stats: stats.reduce((acc, s) => ({ ...acc, [s.status]: s._count }), {}),
+      stats: stats.reduce((acc: Record<string, any>, s: any) => ({ ...acc, [s.status]: s._count }), {}),
     });
   } catch (error: any) {
     console.error('Error fetching notification history:', error);

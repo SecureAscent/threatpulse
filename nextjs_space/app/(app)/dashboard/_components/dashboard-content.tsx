@@ -93,6 +93,7 @@ export default function DashboardContent() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
+      <SetupBanner role={user?.role} />
       {/* Header */}
       <FadeIn>
         <div className="flex items-start justify-between">
@@ -295,4 +296,44 @@ function formatRelativeTime(dateStr: string) {
   const diffDays = Math.floor(diffHrs / 24);
   if (diffDays < 30) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   return date.toLocaleDateString();
+}
+
+
+function SetupBanner({ role }: { role?: string }) {
+  const [show, setShow] = useState(false);
+  const canSee = role === 'SUPERADMIN' || role === 'ADMIN' || role === 'PARENT_ADMIN';
+
+  useEffect(() => {
+    if (!canSee) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/setup');
+        if (res.ok) {
+          const d = await res.json();
+          if (!cancelled) setShow(!d?.setupCompleted);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [canSee]);
+
+  if (!canSee || !show) return null;
+
+  return (
+    <FadeIn>
+      <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm font-medium">Finish setting up your organization</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Complete the security checklist — including enabling two-factor authentication for admins — to secure your account.
+          </p>
+        </div>
+        <Link href="/admin/setup">
+          <Button size="sm" variant="outline" className="border-amber-500/40">View checklist</Button>
+        </Link>
+      </div>
+    </FadeIn>
+  );
 }
