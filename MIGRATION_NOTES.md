@@ -99,3 +99,108 @@ No new **required** variables. Two existing/optional variables affect behavior:
 6. Visit **Admin → Setup Checklist** (as SUPERADMIN) and mark setup complete — the
    dashboard banner should disappear.
 7. Test **Forgot password** → check server logs for the reset link → complete the reset.
+
+
+---
+
+# Migration Notes — Analyst Workflow
+
+This release adds an analyst workflow layer on top of the threat catalog: threat notes,
+assignment, a full status lifecycle with history, saved filters, and bulk actions. It
+introduces **new Prisma models and new columns on `Threat`**, so a database migration is
+required before the app will run.
+
+> These commands were **not** run for you — migrations must be applied on the server that
+> owns the database. Run them from the `nextjs_space/` directory.
+
+---
+
+## 1. Prisma migration (required)
+
+The Prisma schema (`nextjs_space/prisma/schema.prisma`) changed as follows:
+
+### New models
+
+- **`ThreatNote`** — analyst notes on a threat (`threatId`, `authorId`, `content`,
+  `isInternal` flag, timestamps). Cascade-deletes with its threat. `isInternal` notes are
+  hidden from `VIEWER` role.
+- **`ThreatStatusHistory`** — append-only audit of status transitions (`threatId`,
+  `changedById`, `fromStatus`, `toStatus`, optional `note`, `createdAt`). Cascade-deletes
+  with its threat. One row is written on every status change (single threat or bulk).
+- **`SavedFilter`** — reusable threat-list filters (`userId`, `organizationId`, `name`,
+  `filters` JSON, `isShared`). Cascade-deletes with its user and organization. Shared
+  filters are visible to the whole organization.
+
+### New columns on `Threat`
+
+- **`assignedToId`** (`String?`) + **`assignedTo`** relation (`ThreatAssignedTo`) — analyst
+  the threat is assigned to.
+- **`dueDate`** (`DateTime?`) — remediation due date; drives the "overdue" indicators.
+- **`tags`** (`String[]`) — free-form labels for triage/filtering.
+- Back-relations **`notes`** and **`statusHistory`**, plus indexes on `assignedToId` and
+  `status`.
+
+New back-relations were also added to **`User`** (`threatNotes`, `assignedThreats`,
+`statusChanges`, `savedFilters`) and **`Organization`** (`savedFilters`).
+
+### Status lifecycle
+
+The workflow status set is now:
+`NEW → UNDER_REVIEW → ACTION_REQUIRED → IN_PROGRESS → MITIGATED → ACCEPTED_RISK → NOT_RELEVANT`.
+The legacy `INVESTIGATING` and `RESOLVED` values are **not** used by new UI but still render
+correctly (the status helper degrades gracefully for unknown values), so existing rows do
+not need to be backfilled.
+
+### On your server
+
+```bash
+cd nextjs_space
+
+# Generate the Prisma client (safe to run repeatedly)
+npx prisma generate
+
+# Apply the schema. This project uses `db push` (no migrations folder committed):
+npx prisma db push
+```
+
+> `npx prisma generate` has already been run locally so the app typechecks, but **no
+> schema change was pushed** — the database is untouched. All new columns are nullable or
+> have defaults (`tags` defaults to empty), so existing `Threat` rows migrate cleanly with
+> no backfill.
+
+---
+
+## 2. Environment variables
+
+No new environment variables are required for this change.
+
+---
+
+## 3. New API routes
+
+- `GET/POST /api/threats/[id]/notes`, `DELETE /api/threats/[id]/notes/[noteId]` — threat notes.
+- `PATCH /api/threats/[id]/assign` — assign/unassign a threat (validates same-organization analyst).
+- `GET /api/org/analysts` — organization analyst roster for assignment dropdowns.
+- `GET/POST /api/saved-filters`, `DELETE /api/saved-filters/[id]` — saved threat filters.
+- `POST /api/threats/bulk` — bulk status / assignment / due-date / tag actions.
+- `PATCH /api/threats/[id]` — now also accepts `status` (+ optional `statusNote`, writing a
+  `ThreatStatusHistory` row inside a transaction), `assignedToId`, `dueDate`, and `tags`.
+- `GET /api/threats` — supports `assignedTo` (`me` / `unassigned` / user id) and `tag` params.
+- `GET /api/dashboard` — now returns an `actionRequired` summary (counts + top items) for the
+  dashboard workflow widget.
+
+All routes enforce `threats.read` / `threats.manage` permissions via `getTenantContext`, and
+mutations write audit events. `VIEWER` cannot manage; `ANALYST` and above can.
+
+---
+
+## 4. Post-migration smoke test
+
+1. `npx prisma generate && npx prisma db push`.
+2. Start the app and open **Threats**: try the quick-filter pills (Action Required, Mine,
+   Unassigned, Overdue), save a filter, and run a bulk status/assignment action.
+3. Open a threat detail: change status (with a note), assign an analyst, set a due date, add
+   tags, and add both a public and an internal note.
+4. Confirm the status timeline shows the transitions and the **Dashboard → Action Required**
+   widget reflects the open/overdue/unassigned counts.
+5. Open **Actioned Threats** and export the CSV.

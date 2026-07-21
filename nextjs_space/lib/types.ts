@@ -24,6 +24,52 @@ export interface ThreatItem {
   dateAdded: string;
   lastUpdated: string;
   organizationId: string;
+  // --- Analyst workflow (Track B) ---
+  assignedToId?: string | null;
+  assignedTo?: AnalystRef | null;
+  dueDate?: string | null;
+  tags?: string[];
+}
+
+export interface AnalystRef {
+  id: string;
+  name: string | null;
+  email: string;
+  role?: string;
+}
+
+export interface ThreatNoteItem {
+  id: string;
+  threatId: string;
+  authorId: string;
+  author: AnalystRef | null;
+  content: string;
+  isInternal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ThreatStatusHistoryItem {
+  id: string;
+  threatId: string;
+  changedById: string;
+  changedBy: AnalystRef | null;
+  fromStatus: string;
+  toStatus: string;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface SavedFilterItem {
+  id: string;
+  userId: string;
+  organizationId: string;
+  name: string;
+  filters: Record<string, any>;
+  isShared: boolean;
+  createdAt: string;
+  updatedAt: string;
+  owned?: boolean;
 }
 
 export interface OrgUser {

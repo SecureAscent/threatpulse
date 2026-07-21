@@ -13,6 +13,9 @@ export async function GET(req: NextRequest) {
     const severity = url.searchParams.get('severity');
     const status = url.searchParams.get('status');
     const search = url.searchParams.get('search');
+    const assignedTo = url.searchParams.get('assignedTo'); // user id, or "me", or "unassigned"
+    const tag = url.searchParams.get('tag');
+    const currentUserId = (session.user as any)?.id as string | undefined;
 
     // Threats are a GLOBAL shared catalog: every org sees the same CVE / KEV / NVD /
     // RSS feed. Org isolation applies only to products, Jira tickets and asset links.
@@ -20,6 +23,14 @@ export async function GET(req: NextRequest) {
     if (type) where.type = type;
     if (severity) where.severity = severity;
     if (status) where.status = status;
+    if (assignedTo === 'unassigned') {
+      where.assignedToId = null;
+    } else if (assignedTo === 'me') {
+      where.assignedToId = currentUserId ?? '__none__';
+    } else if (assignedTo) {
+      where.assignedToId = assignedTo;
+    }
+    if (tag) where.tags = { has: tag };
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
@@ -31,6 +42,7 @@ export async function GET(req: NextRequest) {
     const threats = await prisma.threat.findMany({
       where,
       orderBy: { dateAdded: 'desc' },
+      include: { assignedTo: { select: { id: true, name: true, email: true, role: true } } },
     });
     return NextResponse.json({ threats });
   } catch (error: any) {

@@ -4,9 +4,10 @@ import { useSession } from 'next-auth/react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Shield, AlertTriangle, TrendingUp, Clock, Zap, RefreshCw, Filter, Settings, ExternalLink, Eye } from 'lucide-react';
+import { Shield, AlertTriangle, TrendingUp, Clock, Zap, RefreshCw, Filter, Settings, ExternalLink, Eye, UserX, CalendarClock, Inbox } from 'lucide-react';
 import { FadeIn, SlideIn } from '@/components/ui/animate';
 import type { ThreatItem } from '@/lib/types';
+import { statusBadgeClass, statusLabel } from '@/lib/threat-status';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
@@ -21,6 +22,28 @@ const severityBadgeVariant: Record<string, string> = {
   LOW: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
 };
 
+interface ActionRequiredItem {
+  id: string;
+  threatId?: string | null;
+  title: string;
+  severity: string;
+  status: string;
+  dueDate?: string | null;
+  tags?: string[];
+  assignedTo?: { id: string; name?: string | null; email: string } | null;
+  overdue?: boolean;
+}
+
+interface ActionRequiredSummary {
+  actionRequiredCount: number;
+  openCount: number;
+  unassignedCount: number;
+  overdueCount: number;
+  myAssignedCount: number;
+  myOpenAssignedCount: number;
+  items: ActionRequiredItem[];
+}
+
 interface DashboardData {
   total: number;
   bySeverity: Record<string, number>;
@@ -30,6 +53,7 @@ interface DashboardData {
   todayCount: number;
   trendData: any[];
   recentThreats: ThreatItem[];
+  actionRequired?: ActionRequiredSummary;
 }
 
 export default function DashboardContent() {
@@ -83,6 +107,7 @@ export default function DashboardContent() {
   const todayCount = stats?.todayCount ?? 0;
   const trendData = stats?.trendData ?? [];
   const recentThreats = stats?.recentThreats ?? [];
+  const actionRequired = stats?.actionRequired;
 
   const metricCards = [
     { label: 'Total Threats', value: total, icon: Shield, color: 'text-primary', bgColor: 'bg-primary/10' },
@@ -142,6 +167,82 @@ export default function DashboardContent() {
           </SlideIn>
         ))}
       </div>
+
+      {/* Action Required Workflow Widget */}
+      {actionRequired && (
+        <SlideIn from="bottom" delay={0.08}>
+          <Card className="border-border/50">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" /> Action Required
+                </CardTitle>
+                <Link href="/threats?filter=action_required" className="text-xs text-primary hover:underline">View queue →</Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Workflow stat tiles */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Action Required', value: actionRequired.actionRequiredCount, icon: AlertTriangle, color: 'text-amber-500', href: '/threats?filter=action_required' },
+                  { label: 'Overdue', value: actionRequired.overdueCount, icon: CalendarClock, color: 'text-red-500', href: '/threats?filter=overdue' },
+                  { label: 'Unassigned', value: actionRequired.unassignedCount, icon: UserX, color: 'text-orange-500', href: '/threats?filter=unassigned' },
+                  { label: 'My Open Items', value: actionRequired.myOpenAssignedCount, icon: Inbox, color: 'text-primary', href: '/threats?filter=mine' },
+                ].map(tile => (
+                  <Link key={tile.label} href={tile.href} className="block">
+                    <div className="bg-muted/30 rounded-lg p-3 border border-border/30 hover:border-border transition-colors">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">{tile.label}</p>
+                        <tile.icon className={`w-3.5 h-3.5 ${tile.color}`} />
+                      </div>
+                      <p className="text-2xl font-display font-bold mt-1">{tile.value ?? 0}</p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+
+              {/* Top action items */}
+              <div className="space-y-1">
+                {(actionRequired.items ?? []).length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">Nothing needs action right now 🎉</p>
+                )}
+                {(actionRequired.items ?? []).map((item: ActionRequiredItem) => (
+                  <Link key={item.id} href={`/threats/${item.id}`} className="block">
+                    <div className="flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors group">
+                      <Badge className={`text-[10px] font-mono px-2 py-0.5 ${severityBadgeVariant[item.severity] ?? ''}`}>
+                        {item.severity ?? 'UNKNOWN'}
+                      </Badge>
+                      <Badge className={`text-[10px] px-2 py-0.5 ${statusBadgeClass(item.status)}`}>
+                        {statusLabel(item.status)}
+                      </Badge>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate group-hover:text-primary transition-colors">
+                          {item.title ?? 'Untitled'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {item.assignedTo ? (
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {item.assignedTo.name || item.assignedTo.email}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-orange-500">Unassigned</span>
+                          )}
+                          {item.dueDate && (
+                            <span className={`text-[10px] flex items-center gap-1 ${item.overdue ? 'text-red-500 font-medium' : 'text-muted-foreground'}`}>
+                              <Clock className="w-3 h-3" />
+                              {item.overdue ? 'Overdue' : 'Due'} {new Date(item.dueDate).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+      )}
 
       {/* Cybellum Product Risk */}
       <SlideIn from="bottom" delay={0.1}>
