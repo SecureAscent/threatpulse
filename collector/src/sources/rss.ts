@@ -16,7 +16,7 @@ const parser = new Parser({
   timeout: 30_000,
   headers: {
     'User-Agent':
-      'ThreatPulse-Collector/1.0 (+https://github.com/EyesMindOpen/threatpulse)',
+      'ThreatPulse-Collector/1.0 (+https://github.com/SecureAscent/threatpulse)',
   },
 });
 
