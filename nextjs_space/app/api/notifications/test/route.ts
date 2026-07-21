@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { db } from '@/lib/db';
-import { sendEmail, sendSlack, sendTeams } from '@/lib/notification-service';
+// Note: sendEmail/sendSlack/sendTeams are defined locally below. The
+// implementations in @/lib/notification-service are private (not exported),
+// so this route carries its own self-contained senders.
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession();
