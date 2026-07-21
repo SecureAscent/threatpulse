@@ -60,6 +60,29 @@ export async function GET() {
 
     const recentThreats = (threats ?? []).slice(0, 15);
 
+    // --- Intelligence engine: risk score insights ---
+    const scored = (threats ?? []).filter((t: any) => typeof t?.riskScore === 'number');
+    const avgRiskScore = scored.length
+      ? Math.round(scored.reduce((sum: number, t: any) => sum + t.riskScore, 0) / scored.length)
+      : 0;
+    const kevCount = (threats ?? []).filter((t: any) => t?.isKev).length;
+    const highRiskThreats = (threats ?? [])
+      .slice()
+      .sort((a: any, b: any) => (b?.riskScore ?? -1) - (a?.riskScore ?? -1))
+      .slice(0, 5)
+      .map((t: any) => ({
+        id: t.id,
+        threatId: t.threatId,
+        title: t.title,
+        severity: t.severity,
+        status: t.status,
+        riskScore: t.riskScore ?? null,
+        epssPercentile: t.epssPercentile ?? null,
+        isKev: t.isKev ?? false,
+        exploitAvailable: t.exploitAvailable ?? false,
+      }));
+    const riskInsights = { avgRiskScore, kevCount, scoredCount: scored.length, highRiskThreats };
+
     // --- Analyst workflow: "Action Required" metrics ---
     const actionRequiredThreats = (threats ?? []).filter(
       (t: any) => t?.status === 'ACTION_REQUIRED',
@@ -119,6 +142,7 @@ export async function GET() {
       trendData,
       recentThreats,
       actionRequired,
+      riskInsights,
     });
   } catch (error: any) {
     console.error('Dashboard error:', error);

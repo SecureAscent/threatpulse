@@ -56,6 +56,11 @@ services:
       NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
       NODE_ENV: production
+      # Reach the collector's control server over the internal docker network
+      # (powers the "Run Now" buttons on the Collector Health dashboard).
+      COLLECTOR_CONTROL_URL: http://collector:${COLLECTOR_CONTROL_PORT:-9464}
+      COLLECTOR_CONTROL_TOKEN: ${COLLECTOR_CONTROL_TOKEN:-}
+      COLLECTOR_INTERVAL_MINUTES: ${COLLECTOR_INTERVAL_MINUTES:-15}
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +83,9 @@ services:
       COLLECTOR_INTERVAL_MINUTES: ${COLLECTOR_INTERVAL_MINUTES:-15}
       COLLECTOR_ORG_SLUG: ${COLLECTOR_ORG_SLUG:-threatpulse-demo}
       NVD_API_KEY: ${NVD_API_KEY:-}
+      # Lightweight HTTP control server used by the app's Collector Health dashboard.
+      COLLECTOR_CONTROL_PORT: ${COLLECTOR_CONTROL_PORT:-9464}
+      COLLECTOR_CONTROL_TOKEN: ${COLLECTOR_CONTROL_TOKEN:-}
       NODE_ENV: production
     depends_on:
       postgres:
@@ -85,6 +93,9 @@ services:
     restart: unless-stopped
     networks:
       - threatpulse-net
+    # Control server reachable by the app on the internal network (not published).
+    expose:
+      - "${COLLECTOR_CONTROL_PORT:-9464}"
 
   # ── Nginx reverse proxy (TLS termination) ──────────────────────────────────
   nginx:

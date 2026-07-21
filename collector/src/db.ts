@@ -168,6 +168,95 @@ export async function upsertThreats(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// CollectorRun observability (Track A)
+// ---------------------------------------------------------------------------
+//
+// The collector records one CollectorRun row per source, per cycle. The row is
+// created when a source starts ("running") and finalized on success/error so
+// the app's Collector Health dashboard can show live status.
+
+export interface RunTotals {
+  itemsFound?: number;
+  itemsNew?: number;
+  itemsUpdated?: number;
+  itemsSkipped?: number;
+}
+
+/** Insert a "running" CollectorRun and return its id. */
+export async function startCollectorRun(source: string): Promise<string | null> {
+  try {
+    const id = generateId();
+    await pool.query(
+      `INSERT INTO "CollectorRun" (id, source, status, "startedAt", "itemsFound", "itemsNew", "itemsUpdated", "itemsSkipped")
+       VALUES ($1, $2, 'running', NOW(), 0, 0, 0, 0)`,
+      [id, source],
+    );
+    return id;
+  } catch (err) {
+    log.warn(`Could not record CollectorRun start for "${source}": ${errMsg(err)}`);
+    return null;
+  }
+}
+
+/** Finalize a CollectorRun as success with item counts and duration. */
+export async function completeCollectorRun(
+  id: string | null,
+  totals: RunTotals,
+  startedAtMs: number,
+): Promise<void> {
+  if (!id) return;
+  try {
+    await pool.query(
+      `UPDATE "CollectorRun" SET
+          status = 'success',
+          "completedAt" = NOW(),
+          "itemsFound" = $2,
+          "itemsNew" = $3,
+          "itemsUpdated" = $4,
+          "itemsSkipped" = $5,
+          "durationMs" = $6
+       WHERE id = $1`,
+      [
+        id,
+        totals.itemsFound ?? 0,
+        totals.itemsNew ?? 0,
+        totals.itemsUpdated ?? 0,
+        totals.itemsSkipped ?? 0,
+        Date.now() - startedAtMs,
+      ],
+    );
+  } catch (err) {
+    log.warn(`Could not record CollectorRun completion (${id}): ${errMsg(err)}`);
+  }
+}
+
+/** Finalize a CollectorRun as error with the message and duration. */
+export async function failCollectorRun(
+  id: string | null,
+  errorMessage: string,
+  startedAtMs: number,
+): Promise<void> {
+  if (!id) return;
+  try {
+    await pool.query(
+      `UPDATE "CollectorRun" SET
+          status = 'error',
+          "completedAt" = NOW(),
+          "errorMessage" = $2,
+          "durationMs" = $3
+       WHERE id = $1`,
+      [id, errorMessage.slice(0, 1000), Date.now() - startedAtMs],
+    );
+  } catch (err) {
+    log.warn(`Could not record CollectorRun failure (${id}): ${errMsg(err)}`);
+  }
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function closePool(): Promise<void> {
   await pool.end();
 }

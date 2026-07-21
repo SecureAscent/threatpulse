@@ -204,3 +204,147 @@ mutations write audit events. `VIEWER` cannot manage; `ANALYST` and above can.
 4. Confirm the status timeline shows the transitions and the **Dashboard → Action Required**
    widget reflects the open/overdue/unassigned counts.
 5. Open **Actioned Threats** and export the CSV.
+
+
+
+---
+
+# Migration Notes — Intelligence Engine
+
+This release adds the threat intelligence engine: a composite **0–100 risk score**,
+**EPSS** enrichment (FIRST.org), **CISA KEV** flagging, **MITRE ATT&CK** technique
+tagging, source **deduplication**, and a **collector health dashboard**. It introduces
+**new columns on `Threat`** and **one new model (`CollectorRun`)**, so a database
+schema push is required before the app will run.
+
+> These commands were **not** run for you — apply them on the server that owns the
+> database. Run them from the `nextjs_space/` directory.
+
+---
+
+## 1. Prisma schema changes (required)
+
+The Prisma schema (`nextjs_space/prisma/schema.prisma`) changed as follows:
+
+### New columns on `Threat`
+
+All are nullable or have defaults, so existing rows migrate cleanly with **no backfill**:
+
+- **`riskScore`** (`Float?`) — composite 0–100 ThreatPulse risk score.
+- **`epssScore`** (`Float?`) — EPSS exploit probability (0–1).
+- **`epssPercentile`** (`Float?`) — EPSS percentile (0–1).
+- **`epssUpdatedAt`** (`DateTime?`) — last time EPSS was fetched for this threat.
+- **`isKev`** (`Boolean @default(false)`) — present in the CISA Known Exploited Vulnerabilities catalog.
+- **`exploitAvailable`** (`Boolean @default(false)`) — a public exploit is known to exist.
+- **`mitreAttackIds`** (`String[]`) — inferred MITRE ATT&CK technique ids (e.g. `T1190`).
+- **`sourceUrls`** (`String[]`) — every source URL that reported this threat (grows on dedup merge).
+- **`dedupKey`** (`String?`) — normalized key (usually the upper-cased CVE id) used to detect duplicates.
+- **`duplicateOf`** (`String?`) — set on a record that was merged into an existing threat.
+- **`enrichedAt`** (`DateTime?`) — last time the enrichment job processed this threat.
+
+New indexes on `Threat`: `@@index([dedupKey])`, `@@index([riskScore])`, `@@index([isKev])`.
+
+### New model
+
+- **`CollectorRun`** — one row per collector source per cycle, powering the collector
+  health dashboard: `source`, `status` (`running` / `success` / `error`), `startedAt`,
+  `completedAt`, `itemsFound`, `itemsNew`, `itemsUpdated`, `itemsSkipped`, `errorMessage`,
+  `durationMs`. Indexed on `source`, `status`, and `startedAt`.
+
+### On your server
+
+```bash
+cd nextjs_space
+
+# Generate the Prisma client (safe to run repeatedly)
+npx prisma generate
+
+# Apply the schema. This project uses `db push` (no migrations folder committed);
+# the docker entrypoint already runs `prisma db push` on container start.
+npx prisma db push
+```
+
+> `npx prisma generate` has already been run locally so the app typechecks, but **no
+> schema change was pushed** — the database is untouched. Because the app's Docker
+> entrypoint (`docker/docker-entrypoint.sh`) runs `prisma db push` on startup, a normal
+> container redeploy applies these columns automatically.
+
+---
+
+## 2. Backfill existing threats (recommended)
+
+New columns start empty, so existing threats have no risk score or enrichment until you
+run the one-time jobs. Both are exposed as admin endpoints and as buttons on the new
+**Admin → Collector Health** page:
+
+- **Enrich** (`POST /api/admin/enrich`, SUPERADMIN) — fetches EPSS, infers MITRE ATT&CK
+  ids, flags KEV, and computes the risk score. Body: `{ limit?, onlyMissing? }`
+  (`onlyMissing` defaults to `true`). EPSS is fetched from FIRST.org in batches of 100
+  and **fails soft** (missing EPSS never blocks enrichment).
+- **Recalculate scores** (`POST /api/admin/recalculate-scores`, SUPERADMIN) — recomputes
+  `riskScore` for every threat from currently stored intelligence, no external calls.
+
+New threats created via `POST /api/threats` are **auto-enriched and deduplicated** on
+insert, so the backfill is only needed once for the pre-existing catalog.
+
+---
+
+## 3. Environment variables
+
+No new **required** variables. New **optional** variables control the collector's
+control server (used by the "Run Now" buttons on the health dashboard):
+
+| Variable | Side | Default | Purpose |
+| --- | --- | --- | --- |
+| `COLLECTOR_CONTROL_PORT` | collector | `9464` | Port for the collector's lightweight HTTP control server. |
+| `COLLECTOR_CONTROL_TOKEN` | collector + app | *(unset)* | Optional shared secret; if set, the app sends it as `x-collector-token` and the collector requires it. |
+| `COLLECTOR_CONTROL_URL` | app | `http://collector:9464` | Base URL the app uses to reach the collector over the internal Docker network. |
+| `COLLECTOR_INTERVAL_MINUTES` | app + collector | `15` | Collection interval; the dashboard uses it to estimate the next run. |
+
+If the collector is not running, the "Run Now" buttons fail soft with a friendly 502 —
+the rest of the dashboard (read from `CollectorRun`) still works.
+
+---
+
+## 4. New API routes & pages
+
+- `GET /api/admin/collector-health` (ADMIN+) — latest run per source, 24h rollup, catalog totals.
+- `POST /api/admin/collector-health/trigger` (ADMIN+) — asks the collector to run now (optional `source`).
+- `POST /api/admin/enrich` (SUPERADMIN) — EPSS + MITRE + KEV + risk enrichment.
+- `POST /api/admin/recalculate-scores` (SUPERADMIN) — recompute all risk scores.
+- `POST /api/threats` — now dedup-checks (returns `{ duplicate: true, existingId }` and
+  merges the source URL) and auto-enriches on create.
+- `GET /api/dashboard` — now returns a `riskInsights` block (avg score, KEV count, top 5 by risk).
+- **Admin → Collector Health** page (`/admin/collector-health`) — source status cards,
+  "Run Now" / "Enrich" / "Recalculate" actions, and an overall health summary
+  (auto-refreshes every 60s). Added to the admin sidebar along with "Enrich Threats" and
+  "Recalculate Scores".
+
+Risk score, KEV, EPSS, and MITRE ATT&CK ids are now surfaced on the **threats list**,
+**threat detail**, and **dashboard**.
+
+---
+
+## 5. Collector changes
+
+The collector (`collector/src/`) now records a `CollectorRun` row per source per cycle
+and exposes a tiny HTTP control server (`collector/src/control.ts`) with `GET /health`
+and `POST /run?source=`. The DB helpers are fail-soft: if `CollectorRun` writes fail,
+collection still proceeds. Run `npm install` in `collector/` if node_modules are not
+vendored (no new runtime dependencies were added).
+
+---
+
+## 6. Post-migration smoke test
+
+1. `npx prisma generate && npx prisma db push`.
+2. Redeploy the collector and app (or `npm install` + restart locally).
+3. As SUPERADMIN, open **Admin → Collector Health**, click **Enrich Threats**, then
+   **Recalculate Scores**; confirm the toast reports counts.
+4. Open **Threats**: sort by Risk Score, confirm 0–100 badges, KEV pills, and EPSS %.
+5. Open a threat detail: confirm the risk badge, KEV/exploit pills, EPSS row, and
+   linked MITRE ATT&CK technique badges.
+6. Open the **Dashboard**: confirm the "Highest Risk Threats" widget (avg score, KEV
+   count, top 5).
+7. Back on **Collector Health**, click **Run Now** on a source and confirm a new run
+   appears (or a friendly error if the collector is offline).

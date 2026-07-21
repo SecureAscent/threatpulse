@@ -29,6 +29,16 @@ export interface ThreatItem {
   assignedTo?: AnalystRef | null;
   dueDate?: string | null;
   tags?: string[];
+  // --- Intelligence engine (Track A) ---
+  riskScore?: number | null;
+  epssScore?: number | null;
+  epssPercentile?: number | null;
+  epssUpdatedAt?: string | null;
+  isKev?: boolean;
+  exploitAvailable?: boolean;
+  mitreAttackIds?: string[];
+  sourceUrls?: string[];
+  enrichedAt?: string | null;
 }
 
 export interface AnalystRef {

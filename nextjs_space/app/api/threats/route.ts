@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
+import { extractDedupKey, findDuplicate, appendSourceUrl } from '@/lib/deduplication';
+import { extractCveId, fetchEpssScores } from '@/lib/enrichment/epss';
+import { inferMitreAttackIds } from '@/lib/enrichment/mitre';
+import { calculateRiskScore, ageInDaysFrom, inferKev } from '@/lib/risk-score';
 
 export async function GET(req: NextRequest) {
   try {
@@ -61,9 +65,59 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { threatId, title, type, severity, status, description, affectedAssets, source, indicators, mitreTactic, mitreTechnique, cvssScore } = body ?? {};
+    const sourceUrl: string | null = body?.sourceUrl || null;
     if (!threatId || !title || !type || !severity) {
       return NextResponse.json({ error: 'Required fields: threatId, title, type, severity' }, { status: 400 });
     }
+
+    // ── Deduplication ──────────────────────────────────────────────────────
+    // Collapse the same underlying CVE reported by multiple feeds into one
+    // canonical threat, appending each new source URL instead of duplicating.
+    const dedupKey = extractDedupKey({ threatId, title, type });
+    if (dedupKey) {
+      const existingId = await findDuplicate(dedupKey, orgId);
+      if (existingId) {
+        await appendSourceUrl(existingId, sourceUrl);
+        return NextResponse.json({ duplicate: true, existingId }, { status: 200 });
+      }
+    }
+
+    // ── Auto-enrichment ────────────────────────────────────────────────────
+    const cvss = cvssScore ? parseFloat(cvssScore) : null;
+    const isKev = inferKev(source);
+    const mitreAttackIds = inferMitreAttackIds({
+      type, title, description, mitreTactic, mitreTechnique,
+    });
+
+    // Best-effort EPSS lookup (fails soft — never blocks creation).
+    let epssScore: number | null = null;
+    let epssPercentile: number | null = null;
+    let epssUpdatedAt: Date | null = null;
+    const cve = extractCveId(threatId, title);
+    if (cve) {
+      try {
+        const scores = await fetchEpssScores([cve]);
+        const s = scores.get(cve);
+        if (s) {
+          epssScore = s.probability;
+          epssPercentile = s.percentile;
+          epssUpdatedAt = new Date();
+        }
+      } catch {
+        /* fail soft */
+      }
+    }
+
+    const riskScore = calculateRiskScore({
+      cvssScore: cvss,
+      epssScore,
+      epssPercentile,
+      isKev,
+      exploitAvailable: false,
+      severity,
+      ageInDays: 0,
+      hasAffectedAssets: Boolean(affectedAssets && String(affectedAssets).trim()),
+    });
 
     const threat = await prisma.threat.create({
       data: {
@@ -78,8 +132,17 @@ export async function POST(req: NextRequest) {
         indicators: indicators || null,
         mitreTactic: mitreTactic || null,
         mitreTechnique: mitreTechnique || null,
-        cvssScore: cvssScore ? parseFloat(cvssScore) : null,
+        cvssScore: cvss,
         organizationId: orgId,
+        dedupKey,
+        sourceUrls: sourceUrl ? [sourceUrl] : [],
+        isKev,
+        mitreAttackIds,
+        epssScore,
+        epssPercentile,
+        epssUpdatedAt,
+        riskScore,
+        enrichedAt: new Date(),
       },
     });
     return NextResponse.json({ threat }, { status: 201 });

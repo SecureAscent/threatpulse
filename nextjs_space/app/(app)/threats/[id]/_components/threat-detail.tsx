@@ -17,7 +17,8 @@ import { FadeIn } from '@/components/ui/animate';
 import type { ThreatItem, ThreatNoteItem, ThreatStatusHistoryItem } from '@/lib/types';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { computeRiskScore, riskScoreBadgeClass, riskScoreLabel } from '@/lib/risk-score';
+import { computeRiskScore, riskScore100BadgeClass, riskScore100Label } from '@/lib/risk-score';
+import { describeMitreIds } from '@/lib/enrichment/mitre';
 import CreateTicketModal from '@/app/(app)/jira-tickets/_components/create-ticket-modal';
 import { THREAT_STATUS_ORDER, statusBadgeClass, statusLabel, statusMeta, isOverdue } from '@/lib/threat-status';
 import { AnalystSelect, analystLabel, analystInitials } from '@/components/analyst-select';
@@ -140,7 +141,12 @@ export default function ThreatDetail({ id }: { id: string }) {
   );
 
   const TypeIcon = typeIcons[threat?.type] ?? Bug;
-  const riskScore = computeRiskScore({ cvssScore: threat?.cvssScore, severity: threat?.severity, source: threat?.source });
+  // Prefer the stored 0-100 composite score; fall back to the legacy 0-10 heuristic (scaled).
+  const riskScore100 =
+    typeof threat?.riskScore === 'number'
+      ? threat.riskScore
+      : Math.round(computeRiskScore({ cvssScore: threat?.cvssScore, severity: threat?.severity, source: threat?.source }) * 10);
+  const mitreLabels = describeMitreIds(threat?.mitreAttackIds ?? []);
 
   const overdue = isOverdue(threat?.dueDate, threat?.status);
 
@@ -157,9 +163,19 @@ export default function ThreatDetail({ id }: { id: string }) {
               <span className="text-sm font-mono text-primary">{threat?.threatId ?? ''}</span>
               <Badge variant="outline" className={`text-[10px] ${severityBadge[threat?.severity] ?? ''}`}>{threat?.severity ?? ''}</Badge>
               <Badge variant="outline" className={`text-[10px] ${statusBadgeClass(threat?.status)}`}>{statusLabel(threat?.status)}</Badge>
-              <Badge variant="outline" className={`text-[10px] font-mono gap-1 ${riskScoreBadgeClass(riskScore)}`} title="ThreatPulse Risk Score">
-                <Shield className="w-3 h-3" /> Risk {riskScore.toFixed(1)} · {riskScoreLabel(riskScore)}
+              <Badge variant="outline" className={`text-[10px] font-mono gap-1 ${riskScore100BadgeClass(riskScore100)}`} title="ThreatPulse composite risk score (0-100)">
+                <Shield className="w-3 h-3" /> Risk {Math.round(riskScore100)} · {riskScore100Label(riskScore100)}
               </Badge>
+              {threat?.isKev && (
+                <Badge variant="outline" className="text-[10px] gap-1 bg-red-500/15 text-red-500 border-red-500/30" title="CISA Known Exploited Vulnerability">
+                  <Flame className="w-3 h-3" /> KEV — Actively Exploited
+                </Badge>
+              )}
+              {threat?.exploitAvailable && (
+                <Badge variant="outline" className="text-[10px] gap-1 bg-orange-500/15 text-orange-500 border-orange-500/30" title="Public exploit available">
+                  <Crosshair className="w-3 h-3" /> Exploit Available
+                </Badge>
+              )}
               {overdue && (
                 <Badge variant="outline" className="text-[10px] gap-1 bg-red-500/10 text-red-400 border-red-500/20">
                   <CalendarClock className="w-3 h-3" /> Overdue
@@ -233,11 +249,45 @@ export default function ThreatDetail({ id }: { id: string }) {
                 {threat?.cvssScore != null && (
                   <DetailRow icon={Shield} label="CVSS Score" value={String(threat.cvssScore)} />
                 )}
+                {typeof threat?.epssScore === 'number' && (
+                  <DetailRow
+                    icon={Flame}
+                    label="EPSS"
+                    value={`${(threat.epssScore * 100).toFixed(1)}% prob${
+                      typeof threat?.epssPercentile === 'number'
+                        ? ` · ${(threat.epssPercentile * 100).toFixed(0)}th pct`
+                        : ''
+                    }`}
+                  />
+                )}
                 {threat?.source && <DetailRow icon={Globe} label="Source" value={threat.source} />}
                 {threat?.affectedAssets && <DetailRow icon={Server} label="Affected Assets" value={threat.affectedAssets} />}
                 {threat?.dateAdded && <DetailRow icon={Calendar} label="Date Added" value={new Date(threat.dateAdded).toLocaleDateString()} />}
                 {threat?.mitreTactic && <DetailRow icon={Activity} label="MITRE Tactic" value={threat.mitreTactic} />}
                 {threat?.mitreTechnique && <DetailRow icon={Activity} label="MITRE Technique" value={threat.mitreTechnique} />}
+                {mitreLabels.length > 0 && (
+                  <div className="flex items-start gap-2 text-sm">
+                    <Activity className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">MITRE ATT&CK</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {mitreLabels.map((m) => (
+                          <a
+                            key={m.id}
+                            href={`https://attack.mitre.org/techniques/${m.id.replace('.', '/')}/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={m.name}
+                          >
+                            <Badge variant="outline" className="text-[9px] font-mono bg-muted/40 hover:bg-muted/70 transition-colors">
+                              {m.id}
+                            </Badge>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </FadeIn>

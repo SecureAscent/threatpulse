@@ -77,6 +77,19 @@ model Threat {
   assetLinks       ThreatAssetLink[]
   notificationLogs NotificationLog[]
 
+  // --- Intelligence engine (Track A) ---
+  riskScore        Float? // ThreatPulse composite risk score 0-100
+  epssScore        Float? // EPSS probability 0-1
+  epssPercentile   Float? // EPSS percentile 0-1
+  epssUpdatedAt    DateTime?
+  isKev            Boolean   @default(false) // present in CISA KEV catalog
+  exploitAvailable Boolean   @default(false)
+  mitreAttackIds   String[] // e.g. ["T1190", "T1133"]
+  sourceUrls       String[] // deduplicated source URLs
+  dedupKey         String? // canonical dedup key (normalized CVE id, etc.)
+  duplicateOf      String? // if a duplicate, points to primary threat id
+  enrichedAt       DateTime?
+
   // --- Analyst workflow (Track B) ---
   assignedToId  String?
   assignedTo    User?                 @relation("ThreatAssignedTo", fields: [assignedToId], references: [id])
@@ -91,6 +104,31 @@ model Threat {
   @@index([assignedToId])
   @@index([dueDate])
   @@index([dateAdded])
+  @@index([dedupKey])
+  @@index([riskScore])
+  @@index([isKev])
+}
+
+// ---------------------------------------------------------------------------
+// Intelligence engine (Track A) — collector observability
+// ---------------------------------------------------------------------------
+
+model CollectorRun {
+  id           String    @id @default(cuid())
+  source       String // "cisa_kev", "nvd", "rss_bleeping", etc.
+  status       String // "running", "success", "error"
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  itemsFound   Int       @default(0)
+  itemsNew     Int       @default(0)
+  itemsUpdated Int       @default(0)
+  itemsSkipped Int       @default(0)
+  errorMessage String?
+  durationMs   Int?
+
+  @@index([source])
+  @@index([status])
+  @@index([startedAt])
 }
 
 // ---------------------------------------------------------------------------

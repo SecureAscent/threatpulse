@@ -6,7 +6,7 @@ import {
   Shield, LayoutDashboard, AlertTriangle, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
   FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell,
-  KeySquare, ListChecks, ShieldCheck
+  KeySquare, ListChecks, ShieldCheck, Activity, Sparkles, Calculator
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -25,6 +25,9 @@ const userItems = [
 const adminItems = [
   { href: '/actioned-threats', label: 'Actioned Threats', icon: CheckSquare },
   { href: '/admin', label: 'Admin', icon: Settings },
+  { href: '/admin/collector-health', label: 'Collector Health', icon: Activity },
+  { href: '/admin/collector-health#enrich', label: 'Enrich Threats', icon: Sparkles },
+  { href: '/admin/collector-health#recalculate', label: 'Recalculate Scores', icon: Calculator },
   { href: '/admin/api-keys', label: 'API Keys', icon: KeySquare },
   { href: '/admin/setup', label: 'Setup Checklist', icon: ListChecks },
 ];

@@ -8,6 +8,7 @@ import { Shield, AlertTriangle, TrendingUp, Clock, Zap, RefreshCw, Filter, Setti
 import { FadeIn, SlideIn } from '@/components/ui/animate';
 import type { ThreatItem } from '@/lib/types';
 import { statusBadgeClass, statusLabel } from '@/lib/threat-status';
+import { riskScore100BadgeClass } from '@/lib/risk-score';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
@@ -44,6 +45,25 @@ interface ActionRequiredSummary {
   items: ActionRequiredItem[];
 }
 
+interface HighRiskItem {
+  id: string;
+  threatId?: string | null;
+  title: string;
+  severity: string;
+  status: string;
+  riskScore: number | null;
+  epssPercentile: number | null;
+  isKev: boolean;
+  exploitAvailable: boolean;
+}
+
+interface RiskInsights {
+  avgRiskScore: number;
+  kevCount: number;
+  scoredCount: number;
+  highRiskThreats: HighRiskItem[];
+}
+
 interface DashboardData {
   total: number;
   bySeverity: Record<string, number>;
@@ -54,6 +74,7 @@ interface DashboardData {
   trendData: any[];
   recentThreats: ThreatItem[];
   actionRequired?: ActionRequiredSummary;
+  riskInsights?: RiskInsights;
 }
 
 export default function DashboardContent() {
@@ -108,6 +129,7 @@ export default function DashboardContent() {
   const trendData = stats?.trendData ?? [];
   const recentThreats = stats?.recentThreats ?? [];
   const actionRequired = stats?.actionRequired;
+  const riskInsights = stats?.riskInsights;
 
   const metricCards = [
     { label: 'Total Threats', value: total, icon: Shield, color: 'text-primary', bgColor: 'bg-primary/10' },
@@ -235,6 +257,64 @@ export default function DashboardContent() {
                           )}
                         </div>
                       </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+      )}
+
+      {/* Risk Intelligence: highest-scoring threats */}
+      {riskInsights && (
+        <SlideIn from="bottom" delay={0.08}>
+          <Card className="border-border/50">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-red-500" /> Highest Risk Threats
+                </CardTitle>
+                <Link href="/threats" className="text-xs text-primary hover:underline">View all →</Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Avg Risk Score</p>
+                  <p className="text-2xl font-display font-bold mt-1">{riskInsights.avgRiskScore}</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Known Exploited (KEV)</p>
+                  <p className="text-2xl font-display font-bold mt-1 text-red-500">{riskInsights.kevCount}</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Scored Threats</p>
+                  <p className="text-2xl font-display font-bold mt-1">{riskInsights.scoredCount}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {(riskInsights.highRiskThreats ?? []).length === 0 && (
+                  <p className="text-sm text-muted-foreground py-2">No scored threats yet. Run enrichment to populate risk scores.</p>
+                )}
+                {(riskInsights.highRiskThreats ?? []).map((item: HighRiskItem) => (
+                  <Link key={item.id} href={`/threats/${item.id}`}
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors">
+                    <div className={`w-11 text-center flex-shrink-0 rounded-md py-1 text-sm font-mono font-bold border ${riskScore100BadgeClass(item.riskScore)}`}>
+                      {item.riskScore != null ? Math.round(item.riskScore) : '—'}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{item.threatId}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {item.isKev && (
+                        <Badge variant="outline" className="text-[9px] bg-red-500/15 text-red-500 border-red-500/30">KEV</Badge>
+                      )}
+                      {typeof item.epssPercentile === 'number' && (
+                        <span className="text-[10px] text-muted-foreground font-mono">EPSS {Math.round(item.epssPercentile * 100)}%</span>
+                      )}
+                      <Badge variant="outline" className={`text-[10px] ${statusBadgeClass(item.status)}`}>{statusLabel(item.status)}</Badge>
                     </div>
                   </Link>
                 ))}

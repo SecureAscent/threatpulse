@@ -13,7 +13,7 @@ import { Calendar as CalendarComp } from '@/components/ui/calendar';
 import { Search, AlertTriangle, Bug, Crosshair, Activity, ChevronRight, X, Plus, ArrowUpDown, Bookmark, BookmarkPlus, Trash2, CalendarClock, Users } from 'lucide-react';
 import { FadeIn } from '@/components/ui/animate';
 import type { ThreatItem, SavedFilterItem } from '@/lib/types';
-import { computeRiskScore, riskScoreBadgeClass } from '@/lib/risk-score';
+import { computeRiskScore, riskScore100BadgeClass, riskScore100Label } from '@/lib/risk-score';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -31,6 +31,13 @@ const severityBadge: Record<string, string> = {
 };
 
 const typeIcons: Record<string, any> = { CVE: Bug, IOC: Crosshair, TTP: Activity };
+
+// Effective 0-100 risk: prefer the stored composite score from the intelligence
+// engine; fall back to the legacy 0-10 heuristic (scaled) for un-enriched rows.
+function effectiveRisk(t: Partial<ThreatItem>): number {
+  if (typeof t?.riskScore === 'number') return t.riskScore;
+  return Math.round(computeRiskScore({ cvssScore: t?.cvssScore, severity: t?.severity, source: t?.source }) * 10);
+}
 
 type QuickFilter = 'all' | 'action_required' | 'mine' | 'unassigned' | 'overdue';
 
@@ -110,8 +117,8 @@ export default function ThreatsContent() {
     if (quickFilter === 'overdue') list = list.filter((t) => isOverdue(t?.dueDate, t?.status));
     if (sortByRisk === 'none') return list;
     return list.sort((a, b) => {
-      const ra = computeRiskScore({ cvssScore: a?.cvssScore, severity: a?.severity, source: a?.source });
-      const rb = computeRiskScore({ cvssScore: b?.cvssScore, severity: b?.severity, source: b?.source });
+      const ra = effectiveRisk(a);
+      const rb = effectiveRisk(b);
       return sortByRisk === 'desc' ? rb - ra : ra - rb;
     });
   })();
@@ -383,7 +390,7 @@ export default function ThreatsContent() {
                   <TableBody>
                     {(displayedThreats ?? []).map((threat: ThreatItem) => {
                       const TypeIcon = typeIcons[threat?.type] ?? Bug;
-                      const riskScore = computeRiskScore({ cvssScore: threat?.cvssScore, severity: threat?.severity, source: threat?.source });
+                      const riskScore = effectiveRisk(threat);
                       const overdue = isOverdue(threat?.dueDate, threat?.status);
                       const isSel = selected.has(threat.id);
                       return (
@@ -411,14 +418,29 @@ export default function ThreatsContent() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${severityBadge[threat?.severity] ?? ''}`}>
-                              {threat?.severity ?? ''}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant="outline" className={`text-[10px] w-fit ${severityBadge[threat?.severity] ?? ''}`}>
+                                {threat?.severity ?? ''}
+                              </Badge>
+                              {threat?.isKev && (
+                                <Badge variant="outline" className="text-[9px] w-fit bg-red-500/15 text-red-500 border-red-500/30 gap-1">
+                                  <AlertTriangle className="w-2.5 h-2.5" /> KEV
+                                </Badge>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`text-[10px] font-mono ${riskScoreBadgeClass(riskScore)}`}>
-                              {riskScore.toFixed(1)}
-                            </Badge>
+                            <div className="flex flex-col gap-0.5">
+                              <Badge variant="outline" className={`text-[10px] font-mono w-fit ${riskScore100BadgeClass(riskScore)}`}>
+                                {Math.round(riskScore)}
+                                <span className="ml-1 opacity-70">{riskScore100Label(riskScore)}</span>
+                              </Badge>
+                              {typeof threat?.epssPercentile === 'number' && (
+                                <span className="text-[9px] text-muted-foreground font-mono" title="EPSS exploit-prediction percentile">
+                                  EPSS {(threat.epssPercentile * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className={`text-[10px] ${statusBadgeClass(threat?.status)}`}>
