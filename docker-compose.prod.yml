@@ -101,9 +101,13 @@ services:
   nginx:
     image: nginx:alpine
     container_name: threatpulse-nginx
+    # This host runs OTHER containers already bound to 80/443, so ThreatPulse's
+    # nginx must NOT publish those. We publish HTTPS on ${HTTPS_PORT} (default
+    # 3000) mapped to the container's :443 TLS listener. Access the app at
+    # https://<domain>:${HTTPS_PORT}. Override HTTPS_PORT in .env.prod if 3000
+    # is taken. No host :80 binding (SSL uses DuckDNS DNS-01, not HTTP-01).
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTPS_PORT:-3000}:443"
     environment:
       # Substituted into the server block at startup (see command below).
       DOMAIN: ${DOMAIN:?DOMAIN is required}
