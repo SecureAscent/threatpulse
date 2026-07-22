@@ -57,7 +57,7 @@ model User {
 
 model Threat {
   id               String            @id @default(cuid())
-  threatId         String            @unique
+  threatId         String
   title            String
   type             String
   severity         String
