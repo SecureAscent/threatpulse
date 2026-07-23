@@ -17,6 +17,19 @@ const USER_SELECT = {
   organization: { select: { id: true, name: true } },
 } as const;
 
+// Parse a JSON body defensively. Some proxies (e.g. nginx in front of the app)
+// can forward a mutating request with an empty/stripped body — notably for
+// DELETE. Without this guard `await req.json()` throws and the handler returns
+// a confusing 500 ("Failed") instead of a clear validation error, which is one
+// reason role changes / removes appeared to silently not work.
+async function readBody(req: NextRequest): Promise<any> {
+  try {
+    return (await req.json()) ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -59,7 +72,7 @@ export async function PATCH(req: NextRequest) {
 
     const isSuper = sUser?.role === 'SUPERADMIN';
 
-    const body = await req.json();
+    const body = await readBody(req);
     const { userId, role } = body ?? {};
     if (!userId || !role) return NextResponse.json({ error: 'userId and role required' }, { status: 400 });
     if (!VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
@@ -92,7 +105,7 @@ export async function POST(req: NextRequest) {
 
     const isSuper = sUser?.role === 'SUPERADMIN';
 
-    const body = await req.json();
+    const body = await readBody(req);
     const { name, email, password } = body ?? {};
     const role = body?.role || 'ANALYST';
 
@@ -143,8 +156,10 @@ export async function DELETE(req: NextRequest) {
 
     const isSuper = sUser?.role === 'SUPERADMIN';
 
-    const body = await req.json();
-    const { userId } = body ?? {};
+    const body = await readBody(req);
+    // Accept userId from the JSON body OR the query string. Some proxies strip
+    // DELETE request bodies, so the client also sends ?userId= as a fallback.
+    const userId = body?.userId || req.nextUrl.searchParams.get('userId');
     if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 });
     if (userId === sUser?.id) return NextResponse.json({ error: 'You cannot remove your own account' }, { status: 400 });
 

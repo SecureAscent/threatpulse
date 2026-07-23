@@ -153,7 +153,7 @@ export default function UsersContent() {
     if (!confirm(`Remove ${name || 'this user'}? This cannot be undone.`)) return;
     setDeletingId(userId);
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch(`/api/admin/users?userId=${encodeURIComponent(userId)}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId }),
