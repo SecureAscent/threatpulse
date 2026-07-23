@@ -97,6 +97,7 @@ model Threat {
   tags          String[]
   notes         ThreatNote[]
   statusHistory ThreatStatusHistory[]
+  complianceTags ComplianceTag[]
 
   @@index([organizationId, type])
   @@index([organizationId, severity])
@@ -451,4 +452,17 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+model ComplianceTag {
+  id          String   @id @default(cuid())
+  threatId    String
+  threat      Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  framework   String // e.g. "NIST_CSF", "ISO_27001", "SOC2", "PCI_DSS"
+  controlId   String // e.g. "ID.RA-1", "A.12.6.1", "CC7.1", "6.3.3"
+  controlName String // Human-readable control name
+  createdAt   DateTime @default(now())
+
+  @@index([threatId])
+  @@index([framework])
 }

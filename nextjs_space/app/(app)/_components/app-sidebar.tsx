@@ -6,7 +6,7 @@ import {
   Shield, LayoutDashboard, AlertTriangle, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
   FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell,
-  KeySquare, ListChecks, ShieldCheck, Activity, Sparkles, Calculator
+  KeySquare, ListChecks, ShieldCheck, Activity, Sparkles, Calculator, Crosshair
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -20,6 +20,8 @@ const userItems = [
   { href: '/jira-tickets', label: 'Jira Tickets', icon: Ticket },
   { href: '/notifications', label: 'Notifications', icon: Bell },
   { href: '/threat-feed', label: 'Threat Feed', icon: Rss },
+  { href: '/blast-radius', label: 'Blast Radius', icon: Crosshair },
+  { href: '/compliance', label: 'Compliance', icon: ShieldCheck },
 ];
 
 const adminItems = [
