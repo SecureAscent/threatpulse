@@ -37,7 +37,7 @@ export default withAuth(
     // Admin-only page routes
     const adminOnly = ['/admin', '/integrations', '/actioned-threats'];
     if (adminOnly.some((p) => pathname.startsWith(p)) && !isAdminRole) {
-      return withSecurityHeaders(NextResponse.redirect(new URL('/dashboard', req.url)));
+      return withSecurityHeaders(NextResponse.redirect(new URL('/overview', req.url)));
     }
 
     return withSecurityHeaders(NextResponse.next());
@@ -51,6 +51,7 @@ export default withAuth(
 
 export const config = {
   matcher: [
+    '/overview/:path*',
     '/dashboard/:path*',
     '/threats/:path*',
     '/upload/:path*',
@@ -66,5 +67,7 @@ export const config = {
     '/settings/:path*',
     '/notifications/:path*',
     '/jira-tickets/:path*',
+    '/blast-radius/:path*',
+    '/compliance/:path*',
   ],
 };
