@@ -10,15 +10,24 @@ export async function GET(req: NextRequest) {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = session.user as any;
-    const orgId = user?.organizationId;
-    if (!orgId) return NextResponse.json({ assets: [] });
+    const isSuper = user?.role === 'SUPERADMIN';
 
     const url = new URL(req.url);
     const search = url.searchParams.get('search');
     const owner = url.searchParams.get('owner');
     const riskLevel = url.searchParams.get('riskLevel'); // high | medium | low
+    const filterOrg = url.searchParams.get('organizationId');
 
-    const where: any = { organizationId: orgId };
+    // SUPERADMIN sees assets across ALL organizations, optionally filtered by
+    // ?organizationId=. Everyone else is scoped to their own organization.
+    const where: any = {};
+    if (isSuper) {
+      if (filterOrg) where.organizationId = filterOrg;
+    } else {
+      const orgId = user?.organizationId;
+      if (!orgId) return NextResponse.json({ assets: [] });
+      where.organizationId = orgId;
+    }
     if (owner) where.productOwner = { contains: owner, mode: 'insensitive' };
     if (search) {
       where.OR = [
@@ -36,6 +45,7 @@ export async function GET(req: NextRequest) {
       orderBy: [{ riskScore: 'desc' }, { productName: 'asc' }],
       include: {
         _count: { select: { threatLinks: true } },
+        organization: { select: { id: true, name: true } },
       },
     });
     return NextResponse.json({ assets });

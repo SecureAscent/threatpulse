@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useSession } from 'next-auth/react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,8 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Package, Shield, AlertTriangle, Plus, Search, X, Pencil, Trash2, Link2, Database,
+  Package, Shield, AlertTriangle, Plus, Search, X, Pencil, Trash2, Link2, Database, Building2,
 } from 'lucide-react';
+import type { AdminOrganization } from '@/lib/types';
 import { FadeIn, SlideIn } from '@/components/ui/animate';
 import { toast } from 'sonner';
 import { assetRiskBadgeClass } from '@/lib/risk-score';
@@ -28,9 +30,15 @@ interface CybellumAsset {
   lastSyncedAt?: string | null;
   createdAt: string;
   _count?: { threatLinks: number };
+  organization?: { id: string; name: string } | null;
 }
 
+const ALL_ORGS = '__all__';
+
 export default function ProductPortfolioContent() {
+  const { data: session } = useSession() || {};
+  const isSuper = (session?.user as any)?.role === 'SUPERADMIN';
+
   const [assets, setAssets] = useState<CybellumAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -39,10 +47,17 @@ export default function ProductPortfolioContent() {
   const [riskFilter, setRiskFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('');
 
-  const fetchAssets = useCallback(async () => {
+  // SUPERADMIN-only: organization list + active org filter
+  const [orgs, setOrgs] = useState<AdminOrganization[]>([]);
+  const [orgFilter, setOrgFilter] = useState<string>(ALL_ORGS);
+
+  const fetchAssets = useCallback(async (orgId?: string) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/cybellum/assets');
+      const url = isSuper && orgId && orgId !== ALL_ORGS
+        ? `/api/cybellum/assets?organizationId=${encodeURIComponent(orgId)}`
+        : '/api/cybellum/assets';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setAssets(data?.assets ?? []);
@@ -52,9 +67,30 @@ export default function ProductPortfolioContent() {
     } finally {
       setLoading(false);
     }
+  }, [isSuper]);
+
+  const fetchOrgs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/organizations');
+      if (res.ok) {
+        const data = await res.json();
+        setOrgs(data?.organizations ?? []);
+      }
+    } catch (err) {
+      console.error('Fetch organizations error:', err);
+    }
   }, []);
 
-  useEffect(() => { fetchAssets(); }, [fetchAssets]);
+  useEffect(() => {
+    fetchAssets(orgFilter);
+    if (isSuper) fetchOrgs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuper]);
+
+  const onOrgFilterChange = (v: string) => {
+    setOrgFilter(v);
+    fetchAssets(v);
+  };
 
   const filtered = useMemo(() => {
     return (assets ?? []).filter((a) => {
@@ -86,7 +122,7 @@ export default function ProductPortfolioContent() {
       const res = await fetch(`/api/cybellum/assets/${id}`, { method: 'DELETE' });
       if (res.ok) {
         toast.success('Asset deleted');
-        fetchAssets();
+        fetchAssets(orgFilter);
       } else {
         toast.error('Failed to delete asset');
       }
@@ -174,6 +210,22 @@ export default function ProductPortfolioContent() {
                 <Input placeholder="Search products, packages..." value={search} onChange={(e: any) => setSearch(e.target.value)} className="pl-10 h-9" />
               </div>
               <Input placeholder="Product owner" value={ownerFilter} onChange={(e: any) => setOwnerFilter(e.target.value)} className="h-9 w-[180px]" />
+              {isSuper && (
+                <Select value={orgFilter} onValueChange={onOrgFilterChange}>
+                  <SelectTrigger className="h-9 w-[200px]">
+                    <Building2 className="w-3.5 h-3.5 mr-1 text-muted-foreground" />
+                    <SelectValue placeholder="All organizations" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_ORGS}>All organizations</SelectItem>
+                    {orgs.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Select value={riskFilter} onValueChange={setRiskFilter}>
                 <SelectTrigger className="w-[150px] h-9"><SelectValue placeholder="Risk Level" /></SelectTrigger>
                 <SelectContent>
@@ -214,6 +266,7 @@ export default function ProductPortfolioContent() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product</TableHead>
+                      {isSuper && <TableHead className="w-[160px]">Organization</TableHead>}
                       <TableHead className="w-[160px]">Package</TableHead>
                       <TableHead className="w-[140px]">Owner</TableHead>
                       <TableHead className="w-[130px]">Department</TableHead>
@@ -229,6 +282,14 @@ export default function ProductPortfolioContent() {
                           <div className="font-medium text-sm">{a.productName}</div>
                           {a.productVersion && <div className="text-xs text-muted-foreground font-mono">v{a.productVersion}</div>}
                         </TableCell>
+                        {isSuper && (
+                          <TableCell className="text-xs text-muted-foreground">
+                            <div className="flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-muted-foreground/70" />
+                              {a.organization?.name ?? '—'}
+                            </div>
+                          </TableCell>
+                        )}
                         <TableCell className="text-xs">
                           {a.packageName ? (
                             <span className="font-mono">{a.packageName}{a.packageVersion ? ` ${a.packageVersion}` : ''}</span>
@@ -266,7 +327,7 @@ export default function ProductPortfolioContent() {
         <p className="text-xs text-muted-foreground text-right mt-2">{filtered.length} product{filtered.length !== 1 ? 's' : ''} shown</p>
       </FadeIn>
 
-      <AddAssetModal open={addOpen} onOpenChange={setAddOpen} asset={editing} onSuccess={fetchAssets} />
+      <AddAssetModal open={addOpen} onOpenChange={setAddOpen} asset={editing} onSuccess={() => fetchAssets(orgFilter)} />
     </div>
   );
 }
