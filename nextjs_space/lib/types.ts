@@ -88,6 +88,15 @@ export interface OrgUser {
   email: string;
   role: string;
   createdAt: string;
+  organizationId?: string | null;
+  organization?: { id: string; name: string } | null;
+}
+
+export interface AdminOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  _count?: { users: number };
 }
 
 export interface DashboardStats {
