@@ -39,12 +39,13 @@ const feedSources = [
 /* ─── Service Integrations ─── */
 const serviceIntegrations = [
   {
-    id: 'jira', name: 'Jira', description: 'Create and search security tickets via REST API v3. Requires a Jira Cloud URL, service account email, and an API token before tickets can be pushed automatically.',
-    icon: Ticket, category: 'ticketing', pendingApproval: true,
+    id: 'jira', name: 'Jira', description: 'Create and track security tickets via REST API v3. Push DRAFT tickets, sync status automatically.',
+    icon: Ticket, category: 'ticketing',
     fields: [
-      { key: 'JIRA_URL', label: 'Jira URL', placeholder: 'https://company.atlassian.net' },
-      { key: 'JIRA_EMAIL', label: 'Jira Email', placeholder: 'user@company.com' },
-      { key: 'JIRA_API_KEY', label: 'API Token', placeholder: 'Your Jira API token', secret: true },
+      { key: 'url', label: 'Jira URL', placeholder: 'https://company.atlassian.net' },
+      { key: 'email', label: 'Jira Email', placeholder: 'user@company.com' },
+      { key: 'apiToken', label: 'API Token', placeholder: 'Your Jira API token', secret: true },
+      { key: 'projectKey', label: 'Project Key', placeholder: 'SEC' },
     ],
   },
   {
@@ -302,13 +303,16 @@ export default function IntegrationsContent() {
   const handleServiceTest = async (svcId: string) => {
     setTesting(svcId);
     try {
-      const res = await fetch('/api/admin/integrations/test', {
+      const endpoint = svcId === 'jira' 
+        ? '/api/integrations/jira/test' 
+        : '/api/admin/integrations/test';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ integrationId: svcId, config: serviceConfigs[svcId] || {} }),
+        body: JSON.stringify(serviceConfigs[svcId] || {}),
       });
       const data = await res.json();
-      if (res.ok && data?.success) {
+      if (res.ok && (data?.ok || data?.success)) {
         toast.success(data.message || 'Connection successful');
         setServiceStatuses(prev => ({ ...prev, [svcId]: 'connected' }));
       } else {

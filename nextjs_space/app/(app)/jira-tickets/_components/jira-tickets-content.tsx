@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import {
   Search, Filter, Ticket, Plus, X, ChevronRight, ExternalLink, ShieldAlert,
-  FileText, CircleDot, Clock, CheckCircle2, Flame,
+  FileText, CircleDot, Clock, CheckCircle2, Flame, RefreshCw, Send,
 } from 'lucide-react';
 import { FadeIn } from '@/components/ui/animate';
 import { toast } from 'sonner';
@@ -61,6 +61,9 @@ export default function JiraTicketsContent() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<JiraTicket | null>(null);
+  const [jiraEnabled, setJiraEnabled] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [pushing, setPushing] = useState<string | null>(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -101,7 +104,54 @@ export default function JiraTicketsContent() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { fetchTickets(); fetchThreats(); }, [fetchTickets, fetchThreats]);
+  const checkJiraConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/integrations');
+      if (res.ok) {
+        const data = await res.json();
+        const jiraCfg = data?.configs?.find((c: any) => c.integrationId === 'jira');
+        setJiraEnabled(!!jiraCfg?.enabled);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const syncFromJira = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/jira-tickets/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(data.message || 'Sync complete');
+        fetchTickets();
+      } else {
+        toast.error(data.error || 'Sync failed');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to sync from Jira');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const pushTicket = async (ticketId: string) => {
+    setPushing(ticketId);
+    try {
+      const res = await fetch(`/api/jira-tickets/${ticketId}/push`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(`Pushed to Jira: ${data.jiraKey}`);
+        fetchTickets();
+      } else {
+        toast.error(data.error || 'Failed to push');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to push to Jira');
+    } finally {
+      setPushing(null);
+    }
+  };
+
+  useEffect(() => { fetchTickets(); fetchThreats(); checkJiraConfig(); }, [fetchTickets, fetchThreats, checkJiraConfig]);
 
   const isKev = (t: JiraTicket) => {
     const s = (t.threat?.source || '').toLowerCase();
@@ -183,21 +233,30 @@ export default function JiraTicketsContent() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">Create and manage remediation tickets from threat intelligence</p>
           </div>
-          <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
-            <Plus className="w-4 h-4" /> Create Ticket
-          </Button>
+          <div className="flex items-center gap-2">
+            {jiraEnabled && (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={syncFromJira} disabled={syncing}>
+                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Syncing...' : 'Sync from Jira'}
+              </Button>
+            )}
+            <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+              <Plus className="w-4 h-4" /> Create Ticket
+            </Button>
+          </div>
         </div>
       </FadeIn>
 
       {/* Jira not connected banner */}
-      <FadeIn delay={0.03}>
-        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-          <ShieldAlert className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
-          <div className="text-sm">
-            <span className="font-semibold text-amber-600 dark:text-amber-400">Jira integration pending approval.</span>{' '}
-            <span className="text-amber-600/90 dark:text-amber-400/90">
-              Tickets created here are stored as drafts in ThreatPulse. Once the Jira integration is enabled in
-              Settings → Integrations, drafts can be pushed to your Jira project automatically.
+      {!jiraEnabled && (
+        <FadeIn delay={0.03}>
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+            <ShieldAlert className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+            <div className="text-sm">
+              <span className="font-semibold text-amber-600 dark:text-amber-400">Jira integration not configured.</span>{' '}
+              <span className="text-amber-600/90 dark:text-amber-400/90">
+                Tickets created here are stored as drafts in ThreatPulse. Configure Jira in
+                Settings → Integrations to push drafts to your Jira project automatically.
             </span>
           </div>
         </div>
@@ -345,18 +404,36 @@ export default function JiraTicketsContent() {
                   </TableHeader>
                   <TableBody>
                     {filtered.map((t) => (
-                      <TableRow key={t.id} className="cursor-pointer hover:bg-muted/30" onClick={() => setSelected(t)}>
+                      <TableRow key={t.id} className="hover:bg-muted/30">
                         <TableCell className="font-mono text-xs">
                           {t.jiraKey ? <span className="text-primary">{t.jiraKey}</span> : <Badge variant="outline" className="text-[10px] bg-slate-500/10 text-slate-400 border-slate-500/20">DRAFT</Badge>}
                         </TableCell>
-                        <TableCell className="font-medium text-sm max-w-[280px] truncate">{t.title}</TableCell>
+                        <TableCell className="font-medium text-sm max-w-[280px] truncate cursor-pointer" onClick={() => setSelected(t)}>{t.title}</TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">{t.cveId || '—'}</TableCell>
                         <TableCell><Badge variant="outline" className={`text-[10px] ${priorityBadge[t.priority] ?? ''}`}>{t.priority}</Badge></TableCell>
                         <TableCell className="font-mono text-xs">{(t.cvssScore ?? t.threat?.cvssScore) != null ? (t.cvssScore ?? t.threat?.cvssScore)!.toFixed(1) : '—'}</TableCell>
                         <TableCell><Badge variant="outline" className={`text-[10px] ${statusBadge[t.status] ?? ''}`}>{t.status.replace('_', ' ')}</Badge></TableCell>
                         <TableCell className="text-xs text-muted-foreground truncate max-w-[140px]">{t.productOwner || '—'}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString()}</TableCell>
-                        <TableCell><ChevronRight className="w-4 h-4 text-muted-foreground" /></TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            {t.status === 'DRAFT' && jiraEnabled && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 gap-1 text-xs"
+                                disabled={pushing === t.id}
+                                onClick={(e) => { e.stopPropagation(); pushTicket(t.id); }}
+                              >
+                                {pushing === t.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                                {pushing === t.id ? 'Pushing...' : 'Push'}
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setSelected(t)}>
+                              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
