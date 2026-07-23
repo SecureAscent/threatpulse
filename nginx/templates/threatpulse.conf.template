@@ -61,21 +61,26 @@ server {
         root /var/www/certbot;
     }
 
+    # Upstream app address via a variable so nginx re-resolves it at request
+    # time (using the resolver in nginx.conf) instead of caching the IP at
+    # startup. This keeps us alive across `make update` container recreations.
+    set $upstream_app app:3000;
+
     # ── Static asset caching (Next.js immutable build output) ──────────────
     location /_next/static/ {
-        proxy_pass http://threatpulse_app;
+        proxy_pass http://$upstream_app$request_uri;
         proxy_cache_valid 200 60m;
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
     location /static/ {
-        proxy_pass http://threatpulse_app;
+        proxy_pass http://$upstream_app$request_uri;
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
     # ── Application (with WebSocket support) ───────────────────────────────
     location / {
-        proxy_pass http://threatpulse_app;
+        proxy_pass http://$upstream_app$request_uri;
         proxy_http_version 1.1;
 
         proxy_set_header Upgrade           $http_upgrade;
