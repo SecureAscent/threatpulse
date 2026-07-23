@@ -11,6 +11,7 @@ import { statusBadgeClass, statusLabel } from '@/lib/threat-status';
 import { riskScore100BadgeClass } from '@/lib/risk-score';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { toast } from 'sonner';
 
 const SeverityChart = dynamic(() => import('./severity-chart'), { ssr: false, loading: () => <div className="h-64 animate-pulse bg-muted rounded-lg" /> });
 const BySourceChart = dynamic(() => import('./by-source-chart'), { ssr: false, loading: () => <div className="h-64 animate-pulse bg-muted rounded-lg" /> });
@@ -102,10 +103,23 @@ export default function DashboardContent() {
 
   const handleCollect = async () => {
     setCollecting(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/admin/collector-health/trigger', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        const msg = data.totalInserted !== undefined && data.totalUpdated !== undefined
+          ? `Collection complete: ${data.totalInserted} new, ${data.totalUpdated} updated.`
+          : data.message || 'Collection triggered successfully.';
+        toast.success(msg, { duration: 5000 });
+        fetchStats();
+      } else {
+        toast.error(data.error || 'Collection failed', { duration: 5000 });
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to trigger collection', { duration: 5000 });
+    } finally {
       setCollecting(false);
-      fetchStats();
-    }, 2000);
+    }
   };
 
   if (loading) {
