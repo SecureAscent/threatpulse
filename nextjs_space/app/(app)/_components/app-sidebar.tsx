@@ -14,6 +14,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { cn } from '@/lib/utils';
 
 const userItems = [
+  { href: '/overview', label: 'Command Center', icon: Activity },
   { href: '/cve-database', label: 'CVE Database', icon: Bug },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/product-portfolio', label: 'Product Portfolio', icon: Package },
