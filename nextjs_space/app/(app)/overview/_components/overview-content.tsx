@@ -205,80 +205,45 @@ export default function OverviewContent() {
         </SlideIn>
       )}
 
-      {/* Blast radius exposure + affected products */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {blast?.stats && (
-          <SlideIn from="left">
-            <Card className="border-border/50 h-full">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Crosshair className="w-4 h-4 text-red-500" /> Blast Radius Exposure
-                  </CardTitle>
-                  <Link href="/blast-radius" className="text-xs text-primary hover:underline flex items-center gap-1">View <ArrowRight className="w-3 h-3" /></Link>
+      {/* Blast radius exposure */}
+      {blast?.stats && (
+        <SlideIn from="left">
+          <Card className="border-border/50">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Crosshair className="w-4 h-4 text-red-500" /> Blast Radius Exposure
+                </CardTitle>
+                <Link href="/blast-radius" className="text-xs text-primary hover:underline flex items-center gap-1">View <ArrowRight className="w-3 h-3" /></Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Threats w/ Impact</p>
+                  <p className="text-2xl font-display font-bold mt-1">{blast.stats.totalThreats}</p>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                    <p className="text-xs text-muted-foreground">Threats w/ Impact</p>
-                    <p className="text-2xl font-display font-bold mt-1">{blast.stats.totalThreats}</p>
-                  </div>
-                  <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                    <p className="text-xs text-muted-foreground">Affected Assets</p>
-                    <p className="text-2xl font-display font-bold mt-1">{blast.stats.totalAffectedAssets}</p>
-                  </div>
-                  <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                    <p className="text-xs text-muted-foreground">Departments</p>
-                    <p className="text-2xl font-display font-bold mt-1">{blast.stats.totalDepartments}</p>
-                  </div>
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Affected Assets</p>
+                  <p className="text-2xl font-display font-bold mt-1">{blast.stats.totalAffectedAssets}</p>
                 </div>
-                {blast.stats.mostExposedDepartment && (
-                  <div className="flex items-center gap-2 text-sm rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-                    <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                    <span className="text-muted-foreground">
-                      Most exposed: <span className="font-medium text-foreground">{blast.stats.mostExposedDepartment}</span> ({blast.stats.mostExposedDepartmentCount} affected asset{blast.stats.mostExposedDepartmentCount === 1 ? '' : 's'})
-                    </span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </SlideIn>
-        )}
-        {brief?.affectedProducts && (
-          <SlideIn from="right">
-            <Card className="border-border/50 h-full">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Package className="w-4 h-4 text-primary" /> Top Affected Products
-                  </CardTitle>
-                  <Link href="/product-portfolio" className="text-xs text-primary hover:underline flex items-center gap-1">View <ArrowRight className="w-3 h-3" /></Link>
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Departments</p>
+                  <p className="text-2xl font-display font-bold mt-1">{blast.stats.totalDepartments}</p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {(brief.affectedProducts ?? []).length === 0 && (
-                  <p className="text-sm text-muted-foreground py-4 text-center">No products linked to active threats.</p>
-                )}
-                <div className="space-y-1">
-                  {(brief.affectedProducts ?? []).slice(0, 6).map((p, i) => (
-                    <div key={i} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/40 transition-colors">
-                      <div className={`w-11 text-center flex-shrink-0 rounded-md py-1 text-sm font-mono font-bold border ${riskScore100BadgeClass(p.maxRisk)}`}>
-                        {Math.round(p.maxRisk)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{p.productName}</p>
-                        <p className="text-xs text-muted-foreground truncate">{p.department}</p>
-                      </div>
-                      <span className="text-xs text-muted-foreground flex-shrink-0">{p.threatCount} threat{p.threatCount === 1 ? '' : 's'}</span>
-                    </div>
-                  ))}
+              </div>
+              {blast.stats.mostExposedDepartment && (
+                <div className="flex items-center gap-2 text-sm rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+                  <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                  <span className="text-muted-foreground">
+                    Most exposed: <span className="font-medium text-foreground">{blast.stats.mostExposedDepartment}</span> ({blast.stats.mostExposedDepartmentCount} affected asset{blast.stats.mostExposedDepartmentCount === 1 ? '' : 's'})
+                  </span>
                 </div>
-              </CardContent>
-            </Card>
-          </SlideIn>
-        )}
-      </div>
+              )}
+            </CardContent>
+          </Card>
+        </SlideIn>
+      )}
     </div>
   );
 
@@ -456,6 +421,89 @@ export default function OverviewContent() {
           </SlideIn>
         ))}
       </div>
+
+      {/* Top Affected Products — prominent section for both analysts & executives */}
+      {brief?.affectedProducts && brief.affectedProducts.length > 0 && (
+        <SlideIn from="bottom">
+          <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Package className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold flex items-center gap-2">
+                      Top Affected Products
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Products with the highest risk exposure across your portfolio
+                    </p>
+                  </div>
+                </div>
+                <Link href="/product-portfolio">
+                  <Button size="sm" variant="outline" className="gap-1.5">
+                    View All <ArrowRight className="w-3.5 h-3.5" />
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {brief.affectedProducts.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No products linked to active threats yet.</p>
+                  <p className="text-xs mt-1">Link threats to products in the Product Portfolio.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {brief.affectedProducts.slice(0, 6).map((p, i) => {
+                    const riskLevel = p.maxRisk >= 80 ? 'critical' : p.maxRisk >= 60 ? 'high' : p.maxRisk >= 40 ? 'medium' : 'low';
+                    const riskColor = riskLevel === 'critical' ? 'red' : riskLevel === 'high' ? 'orange' : riskLevel === 'medium' ? 'amber' : 'emerald';
+                    return (
+                      <Link key={i} href="/product-portfolio" className="block group">
+                        <div className="relative h-full rounded-lg border border-border/50 bg-card hover:border-primary/40 hover:shadow-md transition-all duration-200 overflow-hidden">
+                          {/* Accent stripe */}
+                          <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-${riskColor}-500 to-${riskColor}-400`} />
+                          
+                          <div className="p-4 pt-5">
+                            {/* Risk score badge */}
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="min-w-0 flex-1">
+                                <h3 className="font-semibold text-sm truncate group-hover:text-primary transition-colors">
+                                  {p.productName}
+                                </h3>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                                    {p.department || 'Unknown Dept'}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <div className={`flex-shrink-0 w-14 h-14 rounded-lg flex flex-col items-center justify-center border-2 ${riskScore100BadgeClass(p.maxRisk)}`}>
+                                <span className="text-xl font-display font-bold leading-none">{Math.round(p.maxRisk)}</span>
+                                <span className="text-[9px] uppercase tracking-wider mt-0.5 opacity-80">Risk</span>
+                              </div>
+                            </div>
+
+                            {/* Threat count */}
+                            <div className="flex items-center justify-between pt-3 border-t border-border/30">
+                              <div className="flex items-center gap-1.5 text-muted-foreground">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                <span className="text-xs font-medium">{p.threatCount} Active Threat{p.threatCount === 1 ? '' : 's'}</span>
+                              </div>
+                              <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                            </div>
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </SlideIn>
+      )}
 
       {/* Role-adaptive ordering: everyone sees everything, order reflects the role's priorities */}
       {execFirst ? (
