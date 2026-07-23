@@ -3,51 +3,59 @@ import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 import {
-  Shield, LayoutDashboard, AlertTriangle, Bug, Package, Rss,
+  Shield, LayoutDashboard, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
   FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell,
-  KeySquare, ListChecks, ShieldCheck, Activity, Sparkles, Calculator, Crosshair
+  KeySquare, ListChecks, ShieldCheck, Activity, Radio, Crosshair
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { cn } from '@/lib/utils';
 
-const userItems = [
+// ── Workflow-based navigation groups (enterprise IA) ──────────────────────────
+const overviewItems = [
   { href: '/overview', label: 'Command Center', icon: Activity },
-  { href: '/cve-database', label: 'CVE Database', icon: Bug },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/product-portfolio', label: 'Product Portfolio', icon: Package },
-  { href: '/jira-tickets', label: 'Jira Tickets', icon: Ticket },
-  { href: '/notifications', label: 'Notifications', icon: Bell },
+];
+
+const intelItems = [
+  { href: '/cve-database', label: 'CVE Database', icon: Bug },
   { href: '/threat-feed', label: 'Threat Feed', icon: Rss },
   { href: '/blast-radius', label: 'Blast Radius', icon: Crosshair },
+];
+
+const riskItems = [
+  { href: '/product-portfolio', label: 'Product Portfolio', icon: Package },
   { href: '/compliance', label: 'Compliance', icon: ShieldCheck },
+];
+
+const workflowItems = [
+  { href: '/jira-tickets', label: 'Jira Tickets', icon: Ticket },
+  { href: '/notifications', label: 'Notifications', icon: Bell },
+];
+
+const reportItems = [
+  { href: '/executive-brief', label: 'Executive Brief', icon: Briefcase },
 ];
 
 const adminItems = [
   { href: '/actioned-threats', label: 'Actioned Threats', icon: CheckSquare },
-  { href: '/admin', label: 'Admin', icon: Settings },
-  { href: '/admin/collector-health', label: 'Collector Health', icon: Activity },
-  { href: '/admin/collector-health#enrich', label: 'Enrich Threats', icon: Sparkles },
-  { href: '/admin/collector-health#recalculate', label: 'Recalculate Scores', icon: Calculator },
+  { href: '/admin', label: 'Admin Console', icon: Settings },
+  { href: '/admin/collector-health', label: 'Collector Health', icon: Radio },
   { href: '/admin/api-keys', label: 'API Keys', icon: KeySquare },
   { href: '/admin/setup', label: 'Setup Checklist', icon: ListChecks },
+  { href: '/integrations', label: 'Integrations', icon: Plug },
 ];
 
 const settingsItems = [
   { href: '/settings/security', label: 'Security', icon: ShieldCheck },
-  { href: '/settings/notifications', label: 'Notifications', icon: Bell },
-  { href: '/integrations', label: 'Integrations', icon: Plug },
+  { href: '/settings/notifications', label: 'Notification Prefs', icon: Bell },
 ];
 
-const executiveItems = [
-  { href: '/executive-brief', label: 'Executive Brief', icon: Briefcase },
-  { href: '/how-it-works', label: 'How It Works', icon: FileText },
-  { href: '/policy', label: 'Policy & Procedures', icon: BookOpen },
-];
+type NavItem = { href: string; label: string; icon: any };
 
-function NavSection({ label, items, collapsed, pathname }: { label: string; items: typeof userItems; collapsed: boolean; pathname: string | null }) {
+function NavSection({ label, items, collapsed, pathname }: { label: string; items: NavItem[]; collapsed: boolean; pathname: string | null }) {
   const [open, setOpen] = useState(true);
   return (
     <div>
@@ -102,14 +110,16 @@ export default function AppSidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto scrollbar-none">
-        <NavSection label="User" items={userItems} collapsed={collapsed} pathname={pathname} />
+        <NavSection label="Overview" items={overviewItems} collapsed={collapsed} pathname={pathname} />
+        <NavSection label="Threat Intelligence" items={intelItems} collapsed={collapsed} pathname={pathname} />
+        <NavSection label="Risk & Portfolio" items={riskItems} collapsed={collapsed} pathname={pathname} />
+        <NavSection label="Workflow" items={workflowItems} collapsed={collapsed} pathname={pathname} />
+        <NavSection label="Reports" items={reportItems} collapsed={collapsed} pathname={pathname} />
 
         {isAdmin && (
-          <NavSection label="Admin" items={adminItems} collapsed={collapsed} pathname={pathname} />
+          <NavSection label="Administration" items={adminItems} collapsed={collapsed} pathname={pathname} />
         )}
 
-        <NavSection label="Executive" items={executiveItems} collapsed={collapsed} pathname={pathname} />
-        
         <NavSection label="Settings" items={settingsItems} collapsed={collapsed} pathname={pathname} />
       </nav>
 
@@ -141,10 +151,10 @@ export default function AppSidebar() {
                 </div>
               )}
               <Link href="/how-it-works" className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50">
-                <FileText className="w-3.5 h-3.5" /> Documentation
+                <FileText className="w-3.5 h-3.5" /> How It Works
               </Link>
-              <Link href="/integrations" className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50">
-                <Plug className="w-3.5 h-3.5" /> Integrations
+              <Link href="/policy" className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50">
+                <BookOpen className="w-3.5 h-3.5" /> Policy &amp; Procedures
               </Link>
             </div>
           )}
@@ -152,7 +162,7 @@ export default function AppSidebar() {
 
         <div className="flex items-center justify-between px-2">
           <ThemeToggle />
-          <Link href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/settings/security" className="text-muted-foreground hover:text-foreground transition-colors">
             <Settings className="w-4 h-4" />
           </Link>
           <Button variant="ghost" size="icon-sm" onClick={() => setCollapsed(!collapsed)}>
