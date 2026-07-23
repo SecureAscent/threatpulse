@@ -39,7 +39,7 @@ export async function buildBriefData(opts: { isSuper: boolean; orgId?: string | 
   const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  const orgWhere: any = opts.isSuper ? {} : { organizationId: opts.orgId };
+  const orgWhere: any = opts.isSuper || !opts.orgId ? {} : { organizationId: opts.orgId };
 
   const threats = await prisma.threat.findMany({
     where: orgWhere,
@@ -101,7 +101,7 @@ export async function buildBriefData(opts: { isSuper: boolean; orgId?: string | 
 
   // Affected products (assets) with threat counts and max risk.
   const assets = await prisma.cybellumAsset.findMany({
-    where: opts.isSuper ? {} : { organizationId: opts.orgId },
+    where: opts.isSuper || !opts.orgId ? {} : { organizationId: opts.orgId },
     select: {
       productName: true,
       department: true,
