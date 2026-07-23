@@ -257,10 +257,11 @@ export default function JiraTicketsContent() {
               <span className="text-amber-600/90 dark:text-amber-400/90">
                 Tickets created here are stored as drafts in ThreatPulse. Configure Jira in
                 Settings → Integrations to push drafts to your Jira project automatically.
-            </span>
+              </span>
+            </div>
           </div>
-        </div>
-      </FadeIn>
+        </FadeIn>
+      )}
 
       {/* Stats */}
       <FadeIn delay={0.05}>

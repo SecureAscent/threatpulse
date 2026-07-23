@@ -458,13 +458,19 @@ export default function OverviewContent() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {brief.affectedProducts.slice(0, 6).map((p, i) => {
-                    const riskLevel = p.maxRisk >= 80 ? 'critical' : p.maxRisk >= 60 ? 'high' : p.maxRisk >= 40 ? 'medium' : 'low';
-                    const riskColor = riskLevel === 'critical' ? 'red' : riskLevel === 'high' ? 'orange' : riskLevel === 'medium' ? 'amber' : 'emerald';
+                    // Full static class strings so Tailwind's JIT picks them up.
+                    const stripeClass = p.maxRisk >= 80
+                      ? 'bg-gradient-to-r from-red-500 to-red-400'
+                      : p.maxRisk >= 60
+                        ? 'bg-gradient-to-r from-orange-500 to-orange-400'
+                        : p.maxRisk >= 40
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-400'
+                          : 'bg-gradient-to-r from-emerald-500 to-emerald-400';
                     return (
                       <Link key={i} href="/product-portfolio" className="block group">
                         <div className="relative h-full rounded-lg border border-border/50 bg-card hover:border-primary/40 hover:shadow-md transition-all duration-200 overflow-hidden">
                           {/* Accent stripe */}
-                          <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-${riskColor}-500 to-${riskColor}-400`} />
+                          <div className={`absolute top-0 left-0 right-0 h-1 ${stripeClass}`} />
                           
                           <div className="p-4 pt-5">
                             {/* Risk score badge */}
