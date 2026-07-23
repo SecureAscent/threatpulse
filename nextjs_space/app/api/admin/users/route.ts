@@ -68,14 +68,27 @@ export async function PATCH(req: NextRequest) {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const sUser = session.user as any;
-    if (sUser?.role !== 'ADMIN' && sUser?.role !== 'SUPERADMIN') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    if (sUser?.role !== 'ADMIN' && sUser?.role !== 'SUPERADMIN') {
+      // Log the actual session role so `docker logs threatpulse-app` reveals
+      // WHY a modify was rejected (e.g. a stale JWT still carrying an old role).
+      console.warn(`[admin/users PATCH] denied: session role="${sUser?.role}" id="${sUser?.id}"`);
+      return NextResponse.json({ error: `Admin only (your role: ${sUser?.role ?? 'unknown'})` }, { status: 403 });
+    }
 
     const isSuper = sUser?.role === 'SUPERADMIN';
 
     const body = await readBody(req);
-    const { userId, role } = body ?? {};
-    if (!userId || !role) return NextResponse.json({ error: 'userId and role required' }, { status: 400 });
-    if (!VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+    const { userId, role, organizationId } = body ?? {};
+    if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 });
+    // At least one mutable field must be supplied.
+    if (!role && !organizationId) {
+      return NextResponse.json({ error: 'Provide role and/or organizationId' }, { status: 400 });
+    }
+    if (role && !VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+    // Only a SUPERADMIN may move a user to a different organization.
+    if (organizationId && !isSuper) {
+      return NextResponse.json({ error: 'Only a superadmin can change a user\'s organization' }, { status: 403 });
+    }
 
     // SUPERADMIN can target a user in any org; ADMIN only within their own org.
     const findWhere: any = isSuper
@@ -84,9 +97,19 @@ export async function PATCH(req: NextRequest) {
     const target = await prisma.user.findFirst({ where: findWhere });
     if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
+    // Validate the destination org when reassigning.
+    if (organizationId) {
+      const org = await prisma.organization.findUnique({ where: { id: organizationId } });
+      if (!org) return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+
+    const data: any = {};
+    if (role) data.role = role;
+    if (organizationId) data.organizationId = organizationId;
+
     const updated = await prisma.user.update({
       where: { id: userId },
-      data: { role },
+      data,
       select: USER_SELECT,
     });
     return NextResponse.json({ user: updated });

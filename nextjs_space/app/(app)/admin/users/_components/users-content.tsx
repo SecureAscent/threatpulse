@@ -100,6 +100,27 @@ export default function UsersContent() {
     }
   };
 
+  // SUPERADMIN-only: move a user to a different organization.
+  const updateOrg = async (userId: string, organizationId: string) => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, organizationId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success('Organization updated');
+        // The user may fall outside the active org filter now → refetch the list.
+        await fetchUsers(orgFilter);
+      } else {
+        toast.error(data?.error ?? 'Failed to update organization');
+      }
+    } catch {
+      toast.error('Failed');
+    }
+  };
+
   const openAddDialog = () => {
     // Pre-select an org for superadmins: the active filter, else the first org.
     const preOrg = isSuper
@@ -254,10 +275,20 @@ export default function UsersContent() {
                       <TableCell className="text-sm text-muted-foreground">{u?.email ?? ''}</TableCell>
                       {isSuper && (
                         <TableCell className="text-sm text-muted-foreground">
-                          <div className="flex items-center gap-1.5">
-                            <Building2 className="w-3.5 h-3.5 text-muted-foreground/70" />
-                            {u?.organization?.name ?? '—'}
-                          </div>
+                          <Select
+                            value={u?.organization?.id ?? u?.organizationId ?? ''}
+                            onValueChange={(v: string) => updateOrg(u?.id ?? '', v)}
+                          >
+                            <SelectTrigger className="h-7 text-xs w-[180px]">
+                              <Building2 className="w-3.5 h-3.5 mr-1 text-muted-foreground/70" />
+                              <SelectValue placeholder="—" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {orgs.map((o) => (
+                                <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                       )}
                       <TableCell>
