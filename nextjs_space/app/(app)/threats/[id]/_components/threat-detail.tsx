@@ -44,8 +44,8 @@ function fmtDate(d: string | Date | null | undefined): string {
  * - CVE types (KEV, NVD): Link to NVD CVE detail page
  * - NEWS types (RSS feeds): Link to the article URL from indicators field
  */
-function getSourceUrl(threat: any): string | null {
-  if (!threat) return null;
+function getSourceUrl(threat: any): string | undefined {
+  if (!threat) return undefined;
   
   // For CVE-type threats (KEV, NVD), link to NVD using the threatId (CVE ID)
   if (threat.type === 'CVE' && threat.threatId?.startsWith('CVE-')) {
@@ -62,11 +62,11 @@ function getSourceUrl(threat: any): string | null {
       }
     } catch {
       // Not a valid URL
-      return null;
+      return undefined;
     }
   }
   
-  return null;
+  return undefined;
 }
 
 function fmtDateTime(d: string | Date | null | undefined): string {
