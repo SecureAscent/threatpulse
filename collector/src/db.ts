@@ -119,24 +119,67 @@ export async function upsertThreats(
 
   const client = await pool.connect();
 
-  // Column list + UPDATE SET clause shared by the update-first and the
-  // unique-violation fallback paths. Analyst workflow `status` is deliberately
-  // NOT updated so collection never clobbers triage state.
+  // UPDATE SET clause used by the update-first path and the unique-violation
+  // fallback. Its own parameter numbering ($1..$13) — every referenced $N is
+  // supplied, so Postgres can infer each type. Analyst workflow `status` is
+  // deliberately NOT updated so collection never clobbers triage state.
   const updateSql = `UPDATE "Threat" SET
-      title = $3, type = $4, severity = $5, description = $6,
-      "affectedAssets" = $7, source = $8, indicators = $9,
-      "mitreTactic" = $10, "mitreTechnique" = $11, "cvssScore" = $12,
-      "lastUpdated" = $13
-   WHERE "organizationId" = $14 AND "threatId" = $2`;
+      title = $2, type = $3, severity = $4, description = $5,
+      "affectedAssets" = $6, source = $7, indicators = $8,
+      "mitreTactic" = $9, "mitreTechnique" = $10, "cvssScore" = $11,
+      "lastUpdated" = $12
+   WHERE "organizationId" = $13 AND "threatId" = $1`;
+
+  const insertSql = `INSERT INTO "Threat" (
+      id, "threatId", title, type, severity, status, description,
+      "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
+      "cvssScore", "dateAdded", "lastUpdated", "organizationId"
+   ) VALUES (
+      $1, $2, $3, $4, $5, 'NEW', $6,
+      $7, $8, $9, $10, $11,
+      $12, $13, $13, $14
+   )`;
 
   try {
     for (const r of records) {
       if (!r.threatId || !r.title) continue;
       const now = new Date();
-      const params = [
-        generateId(), // $1 (used only by INSERT)
-        r.threatId.slice(0, 191), // $2
-        r.title.slice(0, 500), // $3
+      const threatId = r.threatId.slice(0, 191);
+      const title = r.title.slice(0, 500);
+
+      // Params for UPDATE ($1..$13): keyed by (threatId, organizationId).
+      const updateParams = [
+        threatId, // $1
+        title, // $2
+        r.type, // $3
+        r.severity, // $4
+        r.description ?? null, // $5
+        r.affectedAssets ?? null, // $6
+        r.source ?? null, // $7
+        r.indicators ?? null, // $8
+        r.mitreTactic ?? null, // $9
+        r.mitreTechnique ?? null, // $10
+        r.cvssScore ?? null, // $11
+        now, // $12
+        organizationId, // $13
+      ];
+
+      // Upsert WITHOUT relying on a DB unique constraint: update first, and
+      // only insert when no existing row matched. This keeps collection working
+      // even if the (organizationId, threatId) unique index has not been
+      // created yet (e.g. blocked by pre-existing duplicate rows), and it never
+      // creates new duplicates for a key that already exists.
+      const upd = await client.query(updateSql, updateParams);
+      if ((upd.rowCount ?? 0) > 0) {
+        result.updated++;
+        continue;
+      }
+
+      // Params for INSERT ($1..$14): id first, then the same record fields.
+      const insertParams = [
+        generateId(), // $1
+        threatId, // $2
+        title, // $3
         r.type, // $4
         r.severity, // $5
         r.description ?? null, // $6
@@ -146,41 +189,19 @@ export async function upsertThreats(
         r.mitreTactic ?? null, // $10
         r.mitreTechnique ?? null, // $11
         r.cvssScore ?? null, // $12
-        now, // $13
+        now, // $13 (used for both "dateAdded" and "lastUpdated")
         organizationId, // $14
       ];
 
-      // Upsert WITHOUT relying on a DB unique constraint: update first, and
-      // only insert when no existing row matched. This keeps collection working
-      // even if the (organizationId, threatId) unique index has not been
-      // created yet (e.g. blocked by pre-existing duplicate rows), and it never
-      // creates new duplicates for a key that already exists.
-      const upd = await client.query(updateSql, params);
-      if ((upd.rowCount ?? 0) > 0) {
-        result.updated++;
-        continue;
-      }
-
       try {
-        await client.query(
-          `INSERT INTO "Threat" (
-              id, "threatId", title, type, severity, status, description,
-              "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
-              "cvssScore", "dateAdded", "lastUpdated", "organizationId"
-           ) VALUES (
-              $1, $2, $3, $4, $5, 'NEW', $6,
-              $7, $8, $9, $10, $11,
-              $12, $13, $13, $14
-           )`,
-          params,
-        );
+        await client.query(insertSql, insertParams);
         result.inserted++;
       } catch (err: any) {
         // If the unique index DOES exist and a race/duplicate slipped in
         // between the update and the insert, fall back to an update rather
         // than failing the entire batch. (23505 = unique_violation.)
         if (err?.code === '23505') {
-          await client.query(updateSql, params);
+          await client.query(updateSql, updateParams);
           result.updated++;
         } else {
           throw err;
