@@ -66,16 +66,29 @@ export function startControlServer(handlers: ControlHandlers): http.Server {
       if (handlers.isRunning()) {
         return send(res, 409, { ok: false, error: 'A collection cycle is already running.' });
       }
-      // Fire the cycle and respond when it completes. Manual runs are
-      // infrequent and the caller expects a result summary.
+      // Kick the cycle off in the BACKGROUND and acknowledge immediately.
+      //
+      // A full cycle (KEV + NVD + RSS) routinely takes far longer than the
+      // app's request timeout — NVD alone sleeps several seconds between pages
+      // when no API key is set. If we blocked the HTTP response until the cycle
+      // finished, the app's fetch would abort with "Collector did not respond
+      // in time" even though collection was proceeding fine. The Collector
+      // Health dashboard polls CollectorRun rows to surface live progress and
+      // final results, so a fire-and-forget acknowledgement is sufficient.
       handlers
         .trigger(source)
-        .then((result) => send(res, result.ok ? 200 : 500, result))
+        .then((result) => log.info(`Manual run finished: ${result.message}`))
         .catch((err) => {
           const msg = err instanceof Error ? err.message : String(err);
-          send(res, 500, { ok: false, error: msg });
+          log.error(`Manual run failed: ${msg}`);
         });
-      return;
+      return send(res, 202, {
+        ok: true,
+        started: true,
+        message: source
+          ? `Collection started for "${source}". Results will appear shortly.`
+          : 'Collection started for all sources. Results will appear shortly.',
+      });
     }
 
     send(res, 404, { ok: false, error: 'Not found' });

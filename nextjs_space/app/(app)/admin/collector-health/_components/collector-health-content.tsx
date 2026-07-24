@@ -116,8 +116,14 @@ export default function CollectorHealthContent() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success(data?.message || 'Collection run triggered');
-        setTimeout(() => load(true), 2500);
+        toast.success(data?.message || 'Collection started');
+        // The collector runs the cycle in the background, so poll the health
+        // endpoint a few times to reflect the running → completed transition.
+        let ticks = 0;
+        const poll = setInterval(() => {
+          load(true);
+          if (++ticks >= 8) clearInterval(poll);
+        }, 5000);
       } else {
         toast.error(data?.error || 'Failed to trigger collection run');
       }

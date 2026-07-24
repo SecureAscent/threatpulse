@@ -37,8 +37,11 @@ export async function POST(req: NextRequest) {
   const url = new URL('/run', CONTROL_URL);
   if (source) url.searchParams.set('source', source);
 
+  // The collector acknowledges immediately (202) and runs the cycle in the
+  // background, so this call returns fast. A short timeout is plenty and keeps
+  // the UI responsive if the collector is genuinely unreachable.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
     const res = await fetch(url.toString(), {
       method: 'POST',
