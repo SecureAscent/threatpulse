@@ -101,10 +101,14 @@ export interface UpsertResult {
 }
 
 /**
- * Upsert a batch of threats keyed by the unique (organizationId, threatId).
- * On conflict we refresh the intelligence fields but PRESERVE the analyst's
- * workflow `status` (NEW / INVESTIGATING / RESOLVED) so collection never
- * clobbers triage work.
+ * Upsert a batch of threats keyed by (organizationId, threatId).
+ *
+ * Implemented as update-first / insert-if-missing rather than SQL ON CONFLICT,
+ * so it does NOT require a DB unique constraint to exist (collection keeps
+ * working even if the unique index could not be created yet). Existing rows
+ * refresh their intelligence fields but PRESERVE the analyst's workflow
+ * `status` (NEW / INVESTIGATING / RESOLVED) so collection never clobbers
+ * triage work.
  */
 export async function upsertThreats(
   records: ThreatRecord[],
@@ -114,53 +118,74 @@ export async function upsertThreats(
   if (records.length === 0) return result;
 
   const client = await pool.connect();
+
+  // Column list + UPDATE SET clause shared by the update-first and the
+  // unique-violation fallback paths. Analyst workflow `status` is deliberately
+  // NOT updated so collection never clobbers triage state.
+  const updateSql = `UPDATE "Threat" SET
+      title = $3, type = $4, severity = $5, description = $6,
+      "affectedAssets" = $7, source = $8, indicators = $9,
+      "mitreTactic" = $10, "mitreTechnique" = $11, "cvssScore" = $12,
+      "lastUpdated" = $13
+   WHERE "organizationId" = $14 AND "threatId" = $2`;
+
   try {
     for (const r of records) {
       if (!r.threatId || !r.title) continue;
-      const id = generateId();
       const now = new Date();
-      const res = await client.query<{ inserted: boolean }>(
-        `INSERT INTO "Threat" (
-            id, "threatId", title, type, severity, status, description,
-            "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
-            "cvssScore", "dateAdded", "lastUpdated", "organizationId"
-         ) VALUES (
-            $1, $2, $3, $4, $5, 'NEW', $6,
-            $7, $8, $9, $10, $11,
-            $12, $13, $13, $14
-         )
-         ON CONFLICT ("organizationId", "threatId") DO UPDATE SET
-            title = EXCLUDED.title,
-            type = EXCLUDED.type,
-            severity = EXCLUDED.severity,
-            description = EXCLUDED.description,
-            "affectedAssets" = EXCLUDED."affectedAssets",
-            source = EXCLUDED.source,
-            indicators = EXCLUDED.indicators,
-            "mitreTactic" = EXCLUDED."mitreTactic",
-            "mitreTechnique" = EXCLUDED."mitreTechnique",
-            "cvssScore" = EXCLUDED."cvssScore",
-            "lastUpdated" = EXCLUDED."lastUpdated"
-         RETURNING (xmax = 0) AS inserted`,
-        [
-          id,
-          r.threatId.slice(0, 191),
-          r.title.slice(0, 500),
-          r.type,
-          r.severity,
-          r.description ?? null,
-          r.affectedAssets ?? null,
-          r.source ?? null,
-          r.indicators ?? null,
-          r.mitreTactic ?? null,
-          r.mitreTechnique ?? null,
-          r.cvssScore ?? null,
-          now,
-          organizationId,
-        ],
-      );
-      if (res.rows[0]?.inserted) result.inserted++;
-      else result.updated++;
+      const params = [
+        generateId(), // $1 (used only by INSERT)
+        r.threatId.slice(0, 191), // $2
+        r.title.slice(0, 500), // $3
+        r.type, // $4
+        r.severity, // $5
+        r.description ?? null, // $6
+        r.affectedAssets ?? null, // $7
+        r.source ?? null, // $8
+        r.indicators ?? null, // $9
+        r.mitreTactic ?? null, // $10
+        r.mitreTechnique ?? null, // $11
+        r.cvssScore ?? null, // $12
+        now, // $13
+        organizationId, // $14
+      ];
+
+      // Upsert WITHOUT relying on a DB unique constraint: update first, and
+      // only insert when no existing row matched. This keeps collection working
+      // even if the (organizationId, threatId) unique index has not been
+      // created yet (e.g. blocked by pre-existing duplicate rows), and it never
+      // creates new duplicates for a key that already exists.
+      const upd = await client.query(updateSql, params);
+      if ((upd.rowCount ?? 0) > 0) {
+        result.updated++;
+        continue;
+      }
+
+      try {
+        await client.query(
+          `INSERT INTO "Threat" (
+              id, "threatId", title, type, severity, status, description,
+              "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
+              "cvssScore", "dateAdded", "lastUpdated", "organizationId"
+           ) VALUES (
+              $1, $2, $3, $4, $5, 'NEW', $6,
+              $7, $8, $9, $10, $11,
+              $12, $13, $13, $14
+           )`,
+          params,
+        );
+        result.inserted++;
+      } catch (err: any) {
+        // If the unique index DOES exist and a race/duplicate slipped in
+        // between the update and the insert, fall back to an update rather
+        // than failing the entire batch. (23505 = unique_violation.)
+        if (err?.code === '23505') {
+          await client.query(updateSql, params);
+          result.updated++;
+        } else {
+          throw err;
+        }
+      }
     }
   } finally {
     client.release();
