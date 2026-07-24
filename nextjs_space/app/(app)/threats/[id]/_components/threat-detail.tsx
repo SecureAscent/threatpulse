@@ -39,6 +39,36 @@ function fmtDate(d: string | Date | null | undefined): string {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/**
+ * Build the source URL for a threat based on its type and available metadata.
+ * - CVE types (KEV, NVD): Link to NVD CVE detail page
+ * - NEWS types (RSS feeds): Link to the article URL from indicators field
+ */
+function getSourceUrl(threat: any): string | null {
+  if (!threat) return null;
+  
+  // For CVE-type threats (KEV, NVD), link to NVD using the threatId (CVE ID)
+  if (threat.type === 'CVE' && threat.threatId?.startsWith('CVE-')) {
+    return `https://nvd.nist.gov/vuln/detail/${threat.threatId}`;
+  }
+  
+  // For RSS/NEWS threats, the article URL is stored in the indicators field
+  if (threat.type === 'NEWS' && threat.indicators) {
+    // indicators might be a full URL or just a path; validate it's a proper URL
+    try {
+      const url = new URL(threat.indicators);
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        return threat.indicators;
+      }
+    } catch {
+      // Not a valid URL
+      return null;
+    }
+  }
+  
+  return null;
+}
+
 function fmtDateTime(d: string | Date | null | undefined): string {
   if (!d) return '—';
   const date = new Date(d);
@@ -260,7 +290,29 @@ export default function ThreatDetail({ id }: { id: string }) {
                     }`}
                   />
                 )}
-                {threat?.source && <DetailRow icon={Globe} label="Source" value={threat.source} />}
+                {threat?.source && (
+                  <div className="flex items-start gap-2 text-sm">
+                    <Globe className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-muted-foreground">Source</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm">{threat.source}</span>
+                        {getSourceUrl(threat) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 text-xs h-7"
+                            asChild
+                          >
+                            <a href={getSourceUrl(threat)} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="w-3 h-3" /> View Source
+                            </a>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {threat?.affectedAssets && <DetailRow icon={Server} label="Affected Assets" value={threat.affectedAssets} />}
                 {threat?.dateAdded && <DetailRow icon={Calendar} label="Date Added" value={new Date(threat.dateAdded).toLocaleDateString()} />}
                 {threat?.mitreTactic && <DetailRow icon={Activity} label="MITRE Tactic" value={threat.mitreTactic} />}
