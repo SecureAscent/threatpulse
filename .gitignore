@@ -1,1 +1,32 @@
 base44/.app.jsonc
+
+# Environment files (secrets)
+.env
+.env.prod
+.env.*.local
+
+# Database backups
+backups/
+
+# Let's Encrypt / certbot data
+certbot/
+
+# Nginx runtime SSL material
+nginx/ssl/
+
+# Collector build output & deps
+collector/dist/
+collector/node_modules/
+
+# Logs
+*.log
+<<<<<<< HEAD
+
+# Private keys / certs
+*.pem
+nextjs_space/.yarn/install-state.gz
+=======
+node_modules/
+nextjs_space/node_modules/
+>>>>>>> 721a45efc (Untrack node_modules; local docker + API changes)
+nextjs_space/.yarn/cache/

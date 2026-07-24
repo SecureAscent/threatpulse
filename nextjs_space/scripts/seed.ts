@@ -84,13 +84,21 @@ async function main() {
     },
   });
 
-  // Upsert sample threats
+  // Upsert sample threats (threatId is not unique, so scope dedup by org)
   for (const threat of sampleThreats) {
-    await prisma.threat.upsert({
-      where: { threatId: threat.threatId },
-      update: { ...threat, organizationId: org.id },
-      create: { ...threat, organizationId: org.id },
+    const existing = await prisma.threat.findFirst({
+      where: { threatId: threat.threatId, organizationId: org.id },
     });
+    if (existing) {
+      await prisma.threat.update({
+        where: { id: existing.id },
+        data: { ...threat, organizationId: org.id },
+      });
+    } else {
+      await prisma.threat.create({
+        data: { ...threat, organizationId: org.id },
+      });
+    }
   }
 
   console.log(`Seeded ${sampleThreats.length} threats, 3 users, 1 organization`);

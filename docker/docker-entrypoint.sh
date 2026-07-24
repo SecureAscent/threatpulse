@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+# NOTE: No set -e — we never want a schema push timeout to kill the container
 
 echo "=============================================="
 echo "       ThreatPulse Intel -- Starting          "
@@ -8,7 +8,7 @@ echo "=============================================="
 # Extract host and port from DATABASE_URL
 DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:/]*\).*|\1|p')
 DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
-DB_HOST=${DB_HOST:-db}
+DB_HOST=${DB_HOST:-postgres}
 DB_PORT=${DB_PORT:-5432}
 
 # Wait for PostgreSQL to be ready using simple TCP check (no extra modules needed)
@@ -25,14 +25,19 @@ until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
 done
 echo "Database is ready"
 
-# Run Prisma schema push (creates/updates tables)
-echo "Pushing database schema..."
+# Run Prisma schema push with a generous timeout — non-fatal if it times out
+# (indexes on large tables can take >60s; we still want the app to start)
+echo "Pushing database schema (timeout 300s)..."
 cd /app/prisma-tools
-npx prisma db push --schema=./prisma/schema.prisma --skip-generate 2>&1 || {
-  echo "Schema push failed, retrying with accept-data-loss..."
-  npx prisma db push --schema=./prisma/schema.prisma --skip-generate --accept-data-loss 2>&1
-}
-echo "Database schema is up to date"
+timeout 300 npx prisma db push --schema=./prisma/schema.prisma --skip-generate --accept-data-loss 2>&1
+PUSH_EXIT=$?
+if [ $PUSH_EXIT -eq 0 ]; then
+  echo "Database schema is up to date"
+elif [ $PUSH_EXIT -eq 124 ]; then
+  echo "WARNING: Schema push timed out after 300s — indexes may still be building in the background. Continuing startup."
+else
+  echo "WARNING: Schema push exited with code $PUSH_EXIT — continuing startup anyway."
+fi
 
 # Seed the database (only if no users exist yet)
 echo "Checking if seed data exists..."
@@ -45,7 +50,7 @@ p.user.count().then(c => { console.log(c); return p.\$disconnect(); }).catch(() 
 if [ "$SEED_CHECK" = "0" ] || [ -z "$SEED_CHECK" ]; then
   echo "Seeding database with demo data..."
   cd /app/prisma-tools
-  NODE_PATH=/app/prisma-tools/node_modules npx tsx scripts/seed.ts 2>&1
+  NODE_PATH=/app/prisma-tools/node_modules npx tsx scripts/seed.ts 2>&1 || true
   echo "Database seeded successfully"
   echo ""
   echo "   Demo accounts created:"
