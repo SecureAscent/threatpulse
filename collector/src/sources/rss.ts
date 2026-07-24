@@ -27,8 +27,11 @@ export interface RssFeed {
 
 // Feeds requested for the collector (task spec) + a couple of reliable extras.
 export const RSS_FEEDS: RssFeed[] = [
-  { name: 'US-CERT / CISA', url: 'https://www.cisa.gov/cybersecurity-advisories/all.xml' },
-  { name: 'CISA Alerts', url: 'https://www.cisa.gov/news.xml' },
+  // NOTE: CISA's *.xml advisory feeds are behind Akamai bot-protection and
+  // return HTTP 403 to server-side clients, so they were removed. CISA's
+  // Known Exploited Vulnerabilities catalog is already ingested via the
+  // dedicated KEV collector. The Hacker News is a reliable general replacement.
+  { name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews' },
   { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/' },
   { name: 'Bleeping Computer', url: 'https://www.bleepingcomputer.com/feed/' },
   { name: 'Dark Reading', url: 'https://www.darkreading.com/rss.xml' },

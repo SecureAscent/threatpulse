@@ -101,7 +101,7 @@ export interface UpsertResult {
 }
 
 /**
- * Upsert a batch of threats keyed by the unique `threatId`.
+ * Upsert a batch of threats keyed by the unique (organizationId, threatId).
  * On conflict we refresh the intelligence fields but PRESERVE the analyst's
  * workflow `status` (NEW / INVESTIGATING / RESOLVED) so collection never
  * clobbers triage work.
@@ -129,7 +129,7 @@ export async function upsertThreats(
             $7, $8, $9, $10, $11,
             $12, $13, $13, $14
          )
-         ON CONFLICT ("threatId") DO UPDATE SET
+         ON CONFLICT ("organizationId", "threatId") DO UPDATE SET
             title = EXCLUDED.title,
             type = EXCLUDED.type,
             severity = EXCLUDED.severity,
