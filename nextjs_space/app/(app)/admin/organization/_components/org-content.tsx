@@ -20,7 +20,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Building2, Users, AlertTriangle, Calendar, Save, Plus, Trash2, ShieldAlert } from 'lucide-react';
+import { Building2, Users, AlertTriangle, Calendar, Save, Plus, Trash2, ShieldAlert, GitBranch } from 'lucide-react';
 import { FadeIn } from '@/components/ui/animate';
 import { toast } from 'sonner';
 
@@ -41,6 +41,8 @@ export default function OrgContent() {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
+  const [department, setDepartment] = useState('');
+  const [parentId, setParentId] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
   // SUPERADMIN-only: list of all orgs + which one is being viewed/edited.
@@ -51,6 +53,8 @@ export default function OrgContent() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
+  const [newDepartment, setNewDepartment] = useState('');
+  const [newParentId, setNewParentId] = useState('');
   const [creating, setCreating] = useState(false);
 
   // Delete confirmation dialog
@@ -64,9 +68,12 @@ export default function OrgContent() {
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        setOrg(data?.organization ?? null);
-        setName(data?.organization?.name ?? '');
-        setSlug(data?.organization?.slug ?? '');
+        const o = data?.organization ?? null;
+        setOrg(o);
+        setName(o?.name ?? '');
+        setSlug(o?.slug ?? '');
+        setDepartment(o?.department ?? '');
+        setParentId(o?.parentId ?? '');
       } else {
         toast.error('Failed to load organization');
       }
@@ -104,10 +111,12 @@ export default function OrgContent() {
     if (!name?.trim()) { toast.error('Name is required'); return; }
     setSaving(true);
     try {
-      const payload: Record<string, string> = { name };
+      const payload: Record<string, any> = { name };
       if (isSuper) {
         if (org?.id) payload.id = org.id;
         if (slug?.trim()) payload.slug = slug.trim();
+        payload.department = department.trim() || null;
+        payload.parentId = parentId || null;
       }
       const res = await fetch('/api/admin/organization', {
         method: 'PATCH',
@@ -116,8 +125,11 @@ export default function OrgContent() {
       });
       if (res.ok) {
         const data = await res.json();
-        setOrg({ ...(org ?? {}), ...(data?.organization ?? {}) });
-        setSlug(data?.organization?.slug ?? slug);
+        const updated = data?.organization ?? {};
+        setOrg({ ...(org ?? {}), ...updated });
+        setSlug(updated?.slug ?? slug);
+        setDepartment(updated?.department ?? '');
+        setParentId(updated?.parentId ?? '');
         toast.success('Organization updated');
         if (isSuper) loadOrgList();
       } else {
@@ -138,7 +150,12 @@ export default function OrgContent() {
       const res = await fetch('/api/admin/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, slug: newSlug || undefined }),
+        body: JSON.stringify({
+          name: newName,
+          slug: newSlug || undefined,
+          department: newDepartment.trim() || undefined,
+          parentId: newParentId || undefined,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -146,6 +163,8 @@ export default function OrgContent() {
         setCreateOpen(false);
         setNewName('');
         setNewSlug('');
+        setNewDepartment('');
+        setNewParentId('');
         await loadOrgList();
         if (data?.organization?.id) handleSelectOrg(data.organization.id);
       } else {
@@ -293,18 +312,57 @@ export default function OrgContent() {
               <Input value={name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)} />
             </div>
             {isSuper && (
-              <div className="space-y-2">
-                <Label>Slug</Label>
-                <Input
-                  value={slug}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSlug(e.target.value)}
-                  className="font-mono"
-                  placeholder="organization-slug"
-                />
-                <p className="text-xs text-muted-foreground">
-                  The slug is a stable identity key (e.g. the collector&apos;s <code>COLLECTOR_ORG_SLUG</code>). Change with care.
-                </p>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label>Slug</Label>
+                  <Input
+                    value={slug}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSlug(e.target.value)}
+                    className="font-mono"
+                    placeholder="organization-slug"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The slug is a stable identity key (e.g. the collector&apos;s <code>COLLECTOR_ORG_SLUG</code>). Change with care.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Department</Label>
+                  <Input
+                    value={department}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDepartment(e.target.value)}
+                    placeholder="e.g. Security Operations, IT Risk"
+                  />
+                  <p className="text-xs text-muted-foreground">Optional label for the business unit or department.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Parent Organization</Label>
+                  <Select
+                    value={parentId || '__none__'}
+                    onValueChange={(v) => setParentId(v === '__none__' ? '' : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="None (top-level)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None (top-level)</SelectItem>
+                      {orgs
+                        .filter((o) => o.id !== org?.id)
+                        .map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.name} · {o.slug}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {org?.parent && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <GitBranch className="w-3 h-3" />
+                      Currently under: <span className="font-medium">{org.parent.name}</span> ({org.parent.slug})
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">Assign this org under another org for hierarchical tenants.</p>
+                </div>
+              </>
             )}
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Calendar className="w-3.5 h-3.5" />
@@ -354,12 +412,32 @@ export default function OrgContent() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>Name</Label>
+              <Label>Name <span className="text-destructive">*</span></Label>
               <Input value={newName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)} placeholder="Acme Corp" />
             </div>
             <div className="space-y-2">
-              <Label>Slug (optional)</Label>
+              <Label>Slug <span className="text-muted-foreground text-xs">(optional)</span></Label>
               <Input value={newSlug} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewSlug(e.target.value)} className="font-mono" placeholder="auto-generated from name" />
+            </div>
+            <div className="space-y-2">
+              <Label>Department <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Input value={newDepartment} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewDepartment(e.target.value)} placeholder="e.g. Security Operations" />
+            </div>
+            <div className="space-y-2">
+              <Label>Parent Organization <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Select value={newParentId || '__none__'} onValueChange={(v) => setNewParentId(v === '__none__' ? '' : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="None (top-level)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None (top-level)</SelectItem>
+                  {orgs.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.name} · {o.slug}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

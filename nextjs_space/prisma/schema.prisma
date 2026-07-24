@@ -12,6 +12,10 @@ model Organization {
   id                 String              @id @default(cuid())
   name               String
   slug               String              @unique
+  department         String?             // e.g. "Security Operations", "IT Risk"
+  parentId           String?             // optional parent org for hierarchical tenants
+  parent             Organization?       @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children           Organization[]      @relation("OrgHierarchy")
   setupCompleted     Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt

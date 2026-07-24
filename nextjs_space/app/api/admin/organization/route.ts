@@ -42,7 +42,10 @@ export async function GET(req: NextRequest) {
 
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
-      include: { _count: { select: { users: true, threats: true } } },
+      include: {
+        _count: { select: { users: true, threats: true } },
+        parent: { select: { id: true, name: true, slug: true } },
+      },
     });
     if (!org) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ organization: org });
@@ -61,29 +64,59 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
 
     const body = await req.json();
-    const { id, name, slug } = body ?? {};
+    const { id, name, slug, department, parentId } = body ?? {};
     const isSuper = user?.role === 'SUPERADMIN';
     const orgId = resolveTargetOrgId(user, id);
     if (!orgId) return NextResponse.json({ error: 'No org' }, { status: 400 });
     if (!name || !String(name).trim())
       return NextResponse.json({ error: 'Name required' }, { status: 400 });
 
-    const data: { name: string; slug?: string } = { name: String(name).trim() };
+    const data: {
+      name: string;
+      slug?: string;
+      department?: string | null;
+      parentId?: string | null;
+    } = { name: String(name).trim() };
 
-    // Only SUPERADMIN may change the slug (it is an identity key used across the
-    // stack, e.g. by the collector's COLLECTOR_ORG_SLUG).
-    if (isSuper && slug != null && String(slug).trim()) {
-      const nextSlug = slugify(String(slug));
-      if (!nextSlug) return NextResponse.json({ error: 'Invalid slug' }, { status: 400 });
-      const clash = await prisma.organization.findFirst({
-        where: { slug: nextSlug, NOT: { id: orgId } },
-        select: { id: true },
-      });
-      if (clash) return NextResponse.json({ error: 'Slug already in use' }, { status: 409 });
-      data.slug = nextSlug;
+    // Only SUPERADMIN may change slug, department, and parentId.
+    if (isSuper) {
+      // Slug: identity key used by the collector. Change with care.
+      if (slug != null && String(slug).trim()) {
+        const nextSlug = slugify(String(slug));
+        if (!nextSlug) return NextResponse.json({ error: 'Invalid slug' }, { status: 400 });
+        const clash = await prisma.organization.findFirst({
+          where: { slug: nextSlug, NOT: { id: orgId } },
+          select: { id: true },
+        });
+        if (clash) return NextResponse.json({ error: 'Slug already in use' }, { status: 409 });
+        data.slug = nextSlug;
+      }
+
+      // Department: free-text label, cleared by sending empty string.
+      data.department = department ? String(department).trim() || null : null;
+
+      // Parent org: must exist and must not create a cycle (org cannot be its own ancestor).
+      if (parentId !== undefined) {
+        if (parentId === null || parentId === '') {
+          data.parentId = null;
+        } else {
+          if (parentId === orgId)
+            return NextResponse.json({ error: 'An organization cannot be its own parent' }, { status: 400 });
+          const parentOrg = await prisma.organization.findUnique({
+            where: { id: String(parentId) },
+            select: { id: true },
+          });
+          if (!parentOrg) return NextResponse.json({ error: 'Parent organization not found' }, { status: 404 });
+          data.parentId = String(parentId);
+        }
+      }
     }
 
-    const org = await prisma.organization.update({ where: { id: orgId }, data });
+    const org = await prisma.organization.update({
+      where: { id: orgId },
+      data,
+      include: { parent: { select: { id: true, name: true, slug: true } } },
+    });
     return NextResponse.json({ organization: org });
   } catch (error: any) {
     console.error('Admin update org error:', error);
