@@ -8,14 +8,17 @@ Target branch: `main`
 - [x] Create release branch from the tenancy hardening branch.
 - [x] Open draft release PR targeting `main`.
 - [x] Reconcile the self-hosted host inspection workflow content from `main`.
-- [ ] Merge `main` history into the release branch.
-- [ ] Confirm no unique production functionality remains stranded in `docker-stack`.
+- [x] Merge `main` history into the release branch.
+- [x] Reconcile Portainer HTTPS and PostgreSQL monitoring work into the release branch.
 
 ## Database
 
 - [ ] Validate Prisma schema formatting and client generation.
 - [ ] Validate all migrations on a new PostgreSQL database.
 - [ ] Validate upgrade from the currently deployed production schema.
+- [ ] On an existing production database, mark `20260716000000_baseline` as applied
+      before running `prisma migrate deploy`; do not execute the baseline SQL over
+      existing tables.
 - [ ] Confirm hierarchy constraint and trigger migrations are idempotent where required.
 - [ ] Verify SUPERADMIN creation after migration.
 - [ ] Capture backup and rollback commands.
