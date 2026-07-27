@@ -4,11 +4,14 @@ import { useSession } from 'next-auth/react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Shield, AlertTriangle, TrendingUp, Clock, Zap, RefreshCw, Filter, Settings, ExternalLink, Eye } from 'lucide-react';
+import { Shield, AlertTriangle, TrendingUp, Clock, Zap, RefreshCw, Filter, Settings, ExternalLink, Eye, UserX, CalendarClock, Inbox } from 'lucide-react';
 import { FadeIn, SlideIn } from '@/components/ui/animate';
 import type { ThreatItem } from '@/lib/types';
+import { statusBadgeClass, statusLabel } from '@/lib/threat-status';
+import { riskScore100BadgeClass } from '@/lib/risk-score';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { toast } from 'sonner';
 
 const SeverityChart = dynamic(() => import('./severity-chart'), { ssr: false, loading: () => <div className="h-64 animate-pulse bg-muted rounded-lg" /> });
 const BySourceChart = dynamic(() => import('./by-source-chart'), { ssr: false, loading: () => <div className="h-64 animate-pulse bg-muted rounded-lg" /> });
@@ -21,6 +24,47 @@ const severityBadgeVariant: Record<string, string> = {
   LOW: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
 };
 
+interface ActionRequiredItem {
+  id: string;
+  threatId?: string | null;
+  title: string;
+  severity: string;
+  status: string;
+  dueDate?: string | null;
+  tags?: string[];
+  assignedTo?: { id: string; name?: string | null; email: string } | null;
+  overdue?: boolean;
+}
+
+interface ActionRequiredSummary {
+  actionRequiredCount: number;
+  openCount: number;
+  unassignedCount: number;
+  overdueCount: number;
+  myAssignedCount: number;
+  myOpenAssignedCount: number;
+  items: ActionRequiredItem[];
+}
+
+interface HighRiskItem {
+  id: string;
+  threatId?: string | null;
+  title: string;
+  severity: string;
+  status: string;
+  riskScore: number | null;
+  epssPercentile: number | null;
+  isKev: boolean;
+  exploitAvailable: boolean;
+}
+
+interface RiskInsights {
+  avgRiskScore: number;
+  kevCount: number;
+  scoredCount: number;
+  highRiskThreats: HighRiskItem[];
+}
+
 interface DashboardData {
   total: number;
   bySeverity: Record<string, number>;
@@ -30,6 +74,8 @@ interface DashboardData {
   todayCount: number;
   trendData: any[];
   recentThreats: ThreatItem[];
+  actionRequired?: ActionRequiredSummary;
+  riskInsights?: RiskInsights;
 }
 
 export default function DashboardContent() {
@@ -57,10 +103,23 @@ export default function DashboardContent() {
 
   const handleCollect = async () => {
     setCollecting(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/admin/collector-health/trigger', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        const msg = data.totalInserted !== undefined && data.totalUpdated !== undefined
+          ? `Collection complete: ${data.totalInserted} new, ${data.totalUpdated} updated.`
+          : data.message || 'Collection triggered successfully.';
+        toast.success(msg, { duration: 5000 });
+        fetchStats();
+      } else {
+        toast.error(data.error || 'Collection failed', { duration: 5000 });
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to trigger collection', { duration: 5000 });
+    } finally {
       setCollecting(false);
-      fetchStats();
-    }, 2000);
+    }
   };
 
   if (loading) {
@@ -83,6 +142,8 @@ export default function DashboardContent() {
   const todayCount = stats?.todayCount ?? 0;
   const trendData = stats?.trendData ?? [];
   const recentThreats = stats?.recentThreats ?? [];
+  const actionRequired = stats?.actionRequired;
+  const riskInsights = stats?.riskInsights;
 
   const metricCards = [
     { label: 'Total Threats', value: total, icon: Shield, color: 'text-primary', bgColor: 'bg-primary/10' },
@@ -93,6 +154,7 @@ export default function DashboardContent() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
+      <SetupBanner role={user?.role} />
       {/* Header */}
       <FadeIn>
         <div className="flex items-start justify-between">
@@ -141,6 +203,140 @@ export default function DashboardContent() {
           </SlideIn>
         ))}
       </div>
+
+      {/* Action Required Workflow Widget */}
+      {actionRequired && (
+        <SlideIn from="bottom" delay={0.08}>
+          <Card className="border-border/50">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" /> Action Required
+                </CardTitle>
+                <Link href="/threats?filter=action_required" className="text-xs text-primary hover:underline">View queue →</Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Workflow stat tiles */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Action Required', value: actionRequired.actionRequiredCount, icon: AlertTriangle, color: 'text-amber-500', href: '/threats?filter=action_required' },
+                  { label: 'Overdue', value: actionRequired.overdueCount, icon: CalendarClock, color: 'text-red-500', href: '/threats?filter=overdue' },
+                  { label: 'Unassigned', value: actionRequired.unassignedCount, icon: UserX, color: 'text-orange-500', href: '/threats?filter=unassigned' },
+                  { label: 'My Open Items', value: actionRequired.myOpenAssignedCount, icon: Inbox, color: 'text-primary', href: '/threats?filter=mine' },
+                ].map(tile => (
+                  <Link key={tile.label} href={tile.href} className="block">
+                    <div className="bg-muted/30 rounded-lg p-3 border border-border/30 hover:border-border transition-colors">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">{tile.label}</p>
+                        <tile.icon className={`w-3.5 h-3.5 ${tile.color}`} />
+                      </div>
+                      <p className="text-2xl font-display font-bold mt-1">{tile.value ?? 0}</p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+
+              {/* Top action items */}
+              <div className="space-y-1">
+                {(actionRequired.items ?? []).length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">Nothing needs action right now 🎉</p>
+                )}
+                {(actionRequired.items ?? []).map((item: ActionRequiredItem) => (
+                  <Link key={item.id} href={`/threats/${item.id}`} className="block">
+                    <div className="flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors group">
+                      <Badge className={`text-[10px] font-mono px-2 py-0.5 ${severityBadgeVariant[item.severity] ?? ''}`}>
+                        {item.severity ?? 'UNKNOWN'}
+                      </Badge>
+                      <Badge className={`text-[10px] px-2 py-0.5 ${statusBadgeClass(item.status)}`}>
+                        {statusLabel(item.status)}
+                      </Badge>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate group-hover:text-primary transition-colors">
+                          {item.title ?? 'Untitled'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {item.assignedTo ? (
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {item.assignedTo.name || item.assignedTo.email}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-orange-500">Unassigned</span>
+                          )}
+                          {item.dueDate && (
+                            <span className={`text-[10px] flex items-center gap-1 ${item.overdue ? 'text-red-500 font-medium' : 'text-muted-foreground'}`}>
+                              <Clock className="w-3 h-3" />
+                              {item.overdue ? 'Overdue' : 'Due'} {new Date(item.dueDate).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+      )}
+
+      {/* Risk Intelligence: highest-scoring threats */}
+      {riskInsights && (
+        <SlideIn from="bottom" delay={0.08}>
+          <Card className="border-border/50">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-red-500" /> Highest Risk Threats
+                </CardTitle>
+                <Link href="/threats" className="text-xs text-primary hover:underline">View all →</Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Avg Risk Score</p>
+                  <p className="text-2xl font-display font-bold mt-1">{riskInsights.avgRiskScore}</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Known Exploited (KEV)</p>
+                  <p className="text-2xl font-display font-bold mt-1 text-red-500">{riskInsights.kevCount}</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                  <p className="text-xs text-muted-foreground">Scored Threats</p>
+                  <p className="text-2xl font-display font-bold mt-1">{riskInsights.scoredCount}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {(riskInsights.highRiskThreats ?? []).length === 0 && (
+                  <p className="text-sm text-muted-foreground py-2">No scored threats yet. Run enrichment to populate risk scores.</p>
+                )}
+                {(riskInsights.highRiskThreats ?? []).map((item: HighRiskItem) => (
+                  <Link key={item.id} href={`/threats/${item.id}`}
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors">
+                    <div className={`w-11 text-center flex-shrink-0 rounded-md py-1 text-sm font-mono font-bold border ${riskScore100BadgeClass(item.riskScore)}`}>
+                      {item.riskScore != null ? Math.round(item.riskScore) : '—'}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{item.threatId}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {item.isKev && (
+                        <Badge variant="outline" className="text-[9px] bg-red-500/15 text-red-500 border-red-500/30">KEV</Badge>
+                      )}
+                      {typeof item.epssPercentile === 'number' && (
+                        <span className="text-[10px] text-muted-foreground font-mono">EPSS {Math.round(item.epssPercentile * 100)}%</span>
+                      )}
+                      <Badge variant="outline" className={`text-[10px] ${statusBadgeClass(item.status)}`}>{statusLabel(item.status)}</Badge>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </SlideIn>
+      )}
 
       {/* Cybellum Product Risk */}
       <SlideIn from="bottom" delay={0.1}>
@@ -295,4 +491,44 @@ function formatRelativeTime(dateStr: string) {
   const diffDays = Math.floor(diffHrs / 24);
   if (diffDays < 30) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   return date.toLocaleDateString();
+}
+
+
+function SetupBanner({ role }: { role?: string }) {
+  const [show, setShow] = useState(false);
+  const canSee = role === 'SUPERADMIN' || role === 'ADMIN' || role === 'PARENT_ADMIN';
+
+  useEffect(() => {
+    if (!canSee) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/setup');
+        if (res.ok) {
+          const d = await res.json();
+          if (!cancelled) setShow(!d?.setupCompleted);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [canSee]);
+
+  if (!canSee || !show) return null;
+
+  return (
+    <FadeIn>
+      <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm font-medium">Finish setting up your organization</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Complete the security checklist — including enabling two-factor authentication for admins — to secure your account.
+          </p>
+        </div>
+        <Link href="/admin/setup">
+          <Button size="sm" variant="outline" className="border-amber-500/40">View checklist</Button>
+        </Link>
+      </div>
+    </FadeIn>
+  );
 }

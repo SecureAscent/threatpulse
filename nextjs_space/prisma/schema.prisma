@@ -27,6 +27,7 @@ model Organization {
   slug                 String              @unique
   description          String?
   timezone             String              @default("UTC")
+  setupCompleted       Boolean             @default(false)
   archivedAt           DateTime?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
@@ -43,6 +44,12 @@ model Organization {
   assetVulnerabilities AssetVulnerability[]
   syncRuns             ExternalSyncRun[]
   identityMappings     ExternalIdentityMapping[]
+  jiraTickets          JiraTicket[]
+  cybellumAssets       CybellumAsset[]
+  notificationLogs     NotificationLog[]
+  apiKeys              ApiKey[]
+  auditLogs            AuditLog[]
+  savedFilters         SavedFilter[]
 
   @@index([parentOrganizationId])
   @@index([archivedAt])
@@ -84,6 +91,18 @@ model User {
   sessions       Session[]
   ownedAssets    Asset[]       @relation("AssetOwnerUser")
   identityMappings ExternalIdentityMapping[]
+  notificationPreference NotificationPreference?
+  notificationLogs       NotificationLog[]
+  digestQueue            DigestQueue[]
+  mfaSecret              MfaSecret?
+  passwordResetTokens    PasswordResetToken[]
+  apiKeys                ApiKey[]                @relation("ApiKeyCreatedBy")
+  activeSessions         ActiveSession[]
+  auditLogs              AuditLog[]
+  authoredNotes          ThreatNote[]            @relation("ThreatNoteAuthor")
+  statusChanges          ThreatStatusHistory[]   @relation("ThreatStatusChangedBy")
+  assignedThreats        Threat[]                @relation("ThreatAssignedTo")
+  savedFilters           SavedFilter[]
 
   @@index([organizationId])
   @@index([departmentId])
@@ -109,12 +128,38 @@ model Threat {
   departmentId   String?
   organization   Organization  @relation(fields: [organizationId], references: [id])
   department     Department?   @relation(fields: [departmentId], references: [id])
+  jiraTickets      JiraTicket[]
+  assetLinks       ThreatAssetLink[]
+  notificationLogs NotificationLog[]
+  riskScore         Float?
+  epssScore         Float?
+  epssPercentile    Float?
+  epssUpdatedAt     DateTime?
+  isKev             Boolean               @default(false)
+  exploitAvailable  Boolean               @default(false)
+  mitreAttackIds    String[]               @default([])
+  sourceUrls        String[]               @default([])
+  dedupKey           String?
+  duplicateOf       String?
+  enrichedAt        DateTime?
+  assignedToId      String?
+  assignedTo        User?                 @relation("ThreatAssignedTo", fields: [assignedToId], references: [id])
+  dueDate            DateTime?
+  tags               String[]               @default([])
+  notes              ThreatNote[]
+  statusHistory      ThreatStatusHistory[]
+  complianceTags     ComplianceTag[]
 
   @@unique([organizationId, threatId])
   @@index([organizationId, type])
   @@index([organizationId, severity])
   @@index([organizationId, status])
+  @@index([assignedToId])
+  @@index([dueDate])
   @@index([dateAdded])
+  @@index([dedupKey])
+  @@index([riskScore])
+  @@index([isKev])
 }
 
 model IntegrationConfig {
@@ -403,4 +448,281 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model CollectorRun {
+  id           String    @id @default(cuid())
+  source       String
+  status       String
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  itemsFound   Int       @default(0)
+  itemsNew     Int       @default(0)
+  itemsUpdated Int       @default(0)
+  itemsSkipped Int       @default(0)
+  errorMessage String?
+  durationMs   Int?
+
+  @@index([source])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model ThreatNote {
+  id         String   @id @default(cuid())
+  threatId   String
+  threat     Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation("ThreatNoteAuthor", fields: [authorId], references: [id])
+  content    String
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([threatId])
+  @@index([authorId])
+}
+
+model ThreatStatusHistory {
+  id          String   @id @default(cuid())
+  threatId    String
+  threat      Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  changedById String
+  changedBy   User     @relation("ThreatStatusChangedBy", fields: [changedById], references: [id])
+  fromStatus  String
+  toStatus    String
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([threatId])
+  @@index([changedById])
+}
+
+model SavedFilter {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  filters        Json
+  isShared       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([organizationId])
+}
+
+model JiraTicket {
+  id               String       @id @default(cuid())
+  threatId         String
+  threat           Threat       @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  jiraKey          String?
+  title            String
+  description      String
+  priority         String
+  status           String       @default("DRAFT")
+  affectedPackage  String?
+  affectedProduct  String?
+  productOwner     String?
+  cvssScore        Float?
+  cveId            String?
+  remediationSteps String?
+  notes            String?
+  createdBy        String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([threatId])
+}
+
+model CybellumAsset {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  cybellumId     String?
+  productName    String
+  productVersion String?
+  packageName    String?
+  packageVersion String?
+  productOwner   String?
+  ownerEmail     String?
+  department     String?
+  riskScore      Float?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  threatLinks    ThreatAssetLink[]
+
+  @@index([organizationId])
+}
+
+model ThreatAssetLink {
+  id        String        @id @default(cuid())
+  threatId  String
+  threat    Threat        @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     CybellumAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  linkedBy  String
+  notes     String?
+  createdAt DateTime      @default(now())
+
+  @@unique([threatId, assetId])
+  @@index([threatId])
+  @@index([assetId])
+}
+
+model NotificationPreference {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailEnabled      Boolean  @default(true)
+  slackEnabled      Boolean  @default(false)
+  teamsEnabled      Boolean  @default(false)
+  email             String?
+  slackWebhook      String?
+  slackChannel      String?
+  teamsWebhook      String?
+  minSeverity       String   @default("HIGH")
+  kevOnly           Boolean  @default(false)
+  assetMatchOnly    Boolean  @default(false)
+  digestMode        String   @default("IMMEDIATE")
+  digestTime        String   @default("08:00")
+  quietHoursEnabled Boolean  @default(false)
+  quietHoursStart   String?
+  quietHoursEnd     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model NotificationLog {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  type           String
+  channel        String
+  status         String
+  title          String
+  message        String
+  metadata       String?
+  threatId       String?
+  threat         Threat?       @relation(fields: [threatId], references: [id], onDelete: SetNull)
+  sentAt         DateTime?
+  failureReason  String?
+  createdAt      DateTime      @default(now())
+  digestQueues   DigestQueue[]
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DigestQueue {
+  id                String          @id @default(cuid())
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationLogId String
+  notificationLog   NotificationLog @relation(fields: [notificationLogId], references: [id], onDelete: Cascade)
+  scheduledFor      DateTime
+  processed         Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+
+  @@index([userId, scheduledFor, processed])
+}
+
+model MfaSecret {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  secret      String
+  verified    Boolean  @default(false)
+  backupCodes String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User         @relation("ApiKeyCreatedBy", fields: [createdById], references: [id])
+  name           String
+  keyPrefix      String
+  keyHash        String       @unique
+  scopes         String[]
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+model ActiveSession {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionToken String    @unique
+  userAgent    String?
+  ipAddress    String?
+  lastSeenAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actorEmail     String?
+  action         String
+  targetType     String?
+  targetId       String?
+  metadata       String?
+  ipAddress      String?
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model ComplianceTag {
+  id          String   @id @default(cuid())
+  threatId    String
+  threat      Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  framework   String
+  controlId   String
+  controlName String
+  createdAt   DateTime @default(now())
+
+  @@index([threatId])
+  @@index([framework])
 }

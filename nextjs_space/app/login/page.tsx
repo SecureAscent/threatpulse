@@ -5,6 +5,6 @@ import LoginForm from './_components/login-form';
 
 export default async function LoginPage() {
   const session = await getServerSession(authOptions);
-  if (session) redirect('/dashboard');
+  if (session) redirect('/overview');
   return <LoginForm />;
 }

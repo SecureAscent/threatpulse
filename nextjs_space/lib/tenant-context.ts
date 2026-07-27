@@ -11,6 +11,7 @@ export type TenantRole = AppRole;
 
 export type TenantPermission =
   | 'threats.read'
+  | 'threats.manage'
   | 'threats.create'
   | 'threats.update'
   | 'threats.delete'
@@ -20,6 +21,7 @@ export type TenantPermission =
 
 export interface TenantContext {
   userId: string;
+  email?: string;
   role: TenantRole;
   organizationId: string;
   departmentId: string | null;
@@ -28,6 +30,7 @@ export interface TenantContext {
 
 const TENANT_PERMISSION_MAP = {
   'threats.read': 'threats.read',
+  'threats.manage': 'threats.manage',
   'threats.create': 'threats.manage',
   'threats.update': 'threats.manage',
   'threats.delete': 'threats.manage',
@@ -36,7 +39,7 @@ const TENANT_PERMISSION_MAP = {
   'integrations.manage': 'integrations.manage',
 } as const;
 
-export async function getTenantContext(): Promise<TenantContext | null> {
+export async function getTenantContext(_request?: unknown): Promise<TenantContext | null> {
   const session = await getServerSession(authOptions);
   const user = session?.user as any;
 
@@ -44,6 +47,7 @@ export async function getTenantContext(): Promise<TenantContext | null> {
 
   return {
     userId: String(user.id),
+    email: String(user.email ?? ''),
     role: normalizeAppRole(user.role),
     organizationId: String(user.organizationId),
     departmentId: user.departmentId ? String(user.departmentId) : null,
@@ -77,6 +81,19 @@ export function buildThreatScope(
 
 export function canAssignDepartment(context: TenantContext): boolean {
   return ['ADMIN', 'PARENT_ADMIN', 'SUPERADMIN'].includes(context.role);
+}
+
+export function isAdmin(context: TenantContext): boolean {
+  return ['DEPARTMENT_ADMIN', 'ADMIN', 'PARENT_ADMIN', 'SUPERADMIN'].includes(
+    context.role,
+  );
+}
+
+export function hasRole(
+  context: TenantContext,
+  ...roles: TenantRole[]
+): boolean {
+  return roles.includes(context.role);
 }
 
 export function normalizeRole(role: unknown): TenantRole {
