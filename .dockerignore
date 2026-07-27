@@ -13,3 +13,13 @@ dist
 !nextjs_space/STYLE_GUIDE.md
 nextjs_space/.env
 nextjs_space/.env.*
+
+# Never ship secrets or runtime dirs into the build context
+.env
+.env.prod
+.env.*.local
+certbot
+backups
+nginx/ssl
+collector/node_modules
+collector/dist

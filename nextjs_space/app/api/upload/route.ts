@@ -105,7 +105,15 @@ export async function POST(req: NextRequest) {
 
     for (const t of threats) {
       try {
-        const existing = await prisma.threat.findUnique({ where: { threatId: t.threatId } });
+        const existing = await prisma.threat.findUnique({
+          where: {
+            organizationId_threatId: {
+              organizationId: orgId,
+              threatId: t.threatId,
+            },
+          },
+          select: { id: true },
+        });
         if (existing) { skipped++; continue; }
         await prisma.threat.create({
           data: {

@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - agent/organization-tenancy-hardening
+      - release/tenancy-platform-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reject tracked dependency and build output
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tracked=$(git ls-files | grep -E '(^|/)(node_modules|\.next|dist|coverage)(/|$)' || true)
+          if [ -n "$tracked" ]; then
+            echo 'Generated dependency or build output is still tracked:'
+            printf '%s\n' "$tracked" | head -n 200
+            exit 1
+          fi
+
+      - name: Reject committed production environment files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tracked=$(git ls-files | grep -E '(^|/)\.env\.prod$' || true)
+          if [ -n "$tracked" ]; then
+            echo 'Production environment files must not be committed:'
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+
+  application:
+    name: Application validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: threatpulse
+          POSTGRES_PASSWORD: threatpulse
+          POSTGRES_DB: threatpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U threatpulse -d threatpulse"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: nextjs_space
+    env:
+      DATABASE_URL: postgresql://threatpulse:threatpulse@localhost:5432/threatpulse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ci-only-secret-not-for-production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pinned Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@4.9.2 --activate
+          yarn --version
+
+      - name: Restore Yarn cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            nextjs_space/.yarn/cache
+            nextjs_space/.yarn/install-state.gz
+          key: ${{ runner.os }}-yarn-${{ hashFiles('nextjs_space/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Validate Prisma schema
+        run: yarn prisma validate --schema=./prisma/schema.prisma
+
+      - name: Generate Prisma client
+        run: yarn db:generate
+
+      - name: Apply migrations to clean PostgreSQL
+        run: yarn prisma migrate deploy --schema=./prisma/schema.prisma
+
+      - name: Verify migration status
+        run: yarn prisma migrate status --schema=./prisma/schema.prisma
+
+      - name: Run tenancy tests
+        run: yarn test:tenancy
+
+      - name: Type-check application
+        run: yarn tsc --noEmit
+
+      - name: Build application
+        run: yarn build
+
+  collector:
+    name: Collector validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: collector
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: collector/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check collector
+        run: npm run typecheck
+
+      - name: Build collector
+        run: npm run build
+
+  shell-safety:
+    name: Shell script syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate operational scripts
+        run: |
+          bash -n scripts/repair-organization-schema.sh
+          bash -n docker/docker-entrypoint.sh

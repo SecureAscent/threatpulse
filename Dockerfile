@@ -4,18 +4,21 @@
 ###############################################################################
 
 # -- Base --------------------------------------------------------------------
-FROM node:20-alpine AS base
-RUN apk add --no-cache libc6-compat openssl
+FROM node:22-alpine AS base
+# wget (busybox) is used by the container HEALTHCHECK; netcat by the entrypoint
+RUN apk add --no-cache libc6-compat openssl wget netcat-openbsd && \
+    corepack enable && \
+    corepack prepare yarn@4.9.2 --activate
 
 # -- Install dependencies ----------------------------------------------------
 FROM base AS deps
 WORKDIR /app
 
-# Copy the real package.json (follows symlink) and lockfile
+# Use the repository's Yarn Berry lockfile with an explicit node_modules linker.
 COPY nextjs_space/package.json ./package.json
-# Copy lockfile if it exists (may be a symlink too)
-COPY nextjs_space/yarn.lock* ./
-RUN yarn install --frozen-lockfile --production=false 2>/dev/null || yarn install --production=false
+COPY nextjs_space/yarn.lock ./yarn.lock
+COPY nextjs_space/.yarnrc.yml ./.yarnrc.yml
+RUN yarn install --immutable
 
 # -- Build -------------------------------------------------------------------
 FROM base AS builder
@@ -27,6 +30,13 @@ COPY nextjs_space/ .
 # Fix Prisma output path for Docker context (schema references absolute dev path)
 RUN sed -i 's|output.*=.*"/home/ubuntu.*"|output = "./node_modules/.prisma/client"|' prisma/schema.prisma
 
+# The app's next.config pins outputFileTracingRoot to the PARENT dir (needed for
+# the original monorepo layout). In Docker the app is self-contained at /app, so
+# a parent tracing root nests the standalone build under an "app/" subfolder and
+# server.js ends up at .next/standalone/app/server.js. Pin the tracing root to
+# /app itself so server.js lands at .next/standalone/server.js as expected.
+RUN sed -i "s|outputFileTracingRoot: path.join(__dirname, '../'),|outputFileTracingRoot: __dirname,|" next.config.js
+
 # Generate Prisma client
 RUN npx prisma generate
 
@@ -34,10 +44,21 @@ RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV NEXT_OUTPUT_MODE=standalone
-# Provide dummy vars needed at build time (overridden at runtime)
+
+# ── Build args (bake public config into the client bundle at build time) ─────
+# NEXT_PUBLIC_* values are inlined into the browser bundle by Next.js, so they
+# MUST be present during `yarn build`. Pass them via docker-compose build args.
+ARG NEXTAUTH_URL="http://localhost:3000"
+ARG NEXT_PUBLIC_APP_URL=""
+ARG NEXT_PUBLIC_APP_NAME="ThreatPulse Intel"
+
+ENV NEXTAUTH_URL=${NEXTAUTH_URL}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
+
+# Dummy secrets needed only to satisfy the build (never used at runtime)
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 ENV NEXTAUTH_SECRET="build-time-placeholder"
-ENV NEXTAUTH_URL="http://localhost:3000"
 
 RUN yarn build
 
@@ -92,5 +113,10 @@ RUN chown -R nextjs:nodejs /app/prisma-tools
 
 USER nextjs
 EXPOSE 3000
+
+# ── Health check ────────────────────────────────────────────────────────────
+# /login is a public 200 page (no auth/DB round-trip required to render).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:3000/login || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

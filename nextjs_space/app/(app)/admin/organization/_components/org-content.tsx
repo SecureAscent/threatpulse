@@ -1,140 +1,153 @@
 'use client';
+
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useSession } from 'next-auth/react';
+import { Building2, Network, Plus, Users, AlertTriangle, Settings2 } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Building2, Users, AlertTriangle, Calendar, Save } from 'lucide-react';
 import { FadeIn } from '@/components/ui/animate';
 import { toast } from 'sonner';
+import type { OrganizationSummary, ParentOrganizationSummary } from '@/lib/types';
+
+async function errorMessage(response: Response, fallback: string) {
+  try {
+    const data = await response.json();
+    return data?.message || data?.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export default function OrgContent() {
-  const [org, setOrg] = useState<any>(null);
+  const { data: session } = useSession();
+  const sessionUser = session?.user as any;
+  const isSuperAdmin = sessionUser?.role === 'SUPERADMIN';
+  const [parents, setParents] = useState<ParentOrganizationSummary[]>([]);
+  const [organization, setOrganization] = useState<OrganizationSummary | null>(null);
+  const [unassigned, setUnassigned] = useState<OrganizationSummary[]>([]);
+  const [parentName, setParentName] = useState('');
+  const [orgName, setOrgName] = useState('');
+  const [parentId, setParentId] = useState('');
   const [loading, setLoading] = useState(true);
-  const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const fetchOrg = async () => {
-      try {
-        const res = await fetch('/api/admin/organization');
-        if (res.ok) {
-          const data = await res.json();
-          setOrg(data?.organization ?? null);
-          setName(data?.organization?.name ?? '');
-        }
-      } catch (err: any) {
-        console.error('Fetch org error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchOrg();
-  }, []);
+  const load = async () => {
+    const response = await fetch('/api/admin/orgs', { cache: 'no-store' });
+    if (!response.ok) throw new Error(await errorMessage(response, 'Failed to load hierarchy'));
+    const data = await response.json();
+    setParents(data.parents ?? []);
+    setUnassigned(data.unassignedOrganizations ?? []);
+    setOrganization(data.organization ?? null);
+  };
 
-  const handleSave = async () => {
-    if (!name?.trim()) { toast.error('Name is required'); return; }
+  useEffect(() => {
+    if (!sessionUser) return;
+    load().catch((error) => toast.error(error.message)).finally(() => setLoading(false));
+  }, [sessionUser?.id]);
+
+  const post = async (payload: Record<string, unknown>, success: string): Promise<boolean> => {
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/organization', {
-        method: 'PATCH',
+      const response = await fetch('/api/admin/orgs', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setOrg({ ...(org ?? {}), ...(data?.organization ?? {}) });
-        toast.success('Organization updated');
-      } else {
-        toast.error('Failed to update');
-      }
-    } catch {
-      toast.error('Failed');
+      if (!response.ok) throw new Error(await errorMessage(response, 'Operation failed'));
+      await load();
+      toast.success(success);
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Operation failed');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) return <div className="p-6"><div className="h-64 bg-muted animate-pulse rounded-xl" /></div>;
+  if (loading) return <div className="p-6"><div className="h-64 rounded-xl bg-muted animate-pulse" /></div>;
+
+  if (!isSuperAdmin) {
+    if (!organization) {
+      return <div className="p-6"><Card><CardContent className="py-12 text-center text-sm text-muted-foreground">Your administrator account is not assigned to an organization.</CardContent></Card></div>;
+    }
+    return (
+      <div className="p-6 space-y-6 max-w-[1000px] mx-auto">
+        <FadeIn><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-2xl font-display font-bold tracking-tight">Organization Hierarchy</h1><p className="text-sm text-muted-foreground mt-1">{sessionUser?.parentOrganizationName ? `${sessionUser.parentOrganizationName} / ` : ''}{organization.name}</p></div><Button asChild variant="outline"><Link href="/admin/organization/departments"><Settings2 className="w-4 h-4 mr-2" />Manage Departments</Link></Button></div></FadeIn>
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Metric label="Departments" value={organization._count?.departments ?? organization.departments?.length ?? 0} icon={Network} />
+          <Metric label="Members" value={organization._count?.users ?? 0} icon={Users} />
+          <Metric label="Threats" value={organization._count?.threats ?? 0} icon={AlertTriangle} />
+        </div>
+        <DepartmentPanel organization={organization} saving={saving} onAddDepartment={async (name) => post({ action: 'createDepartment', name }, 'Department created')} />
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 space-y-6 max-w-[800px] mx-auto">
-      <FadeIn>
-        <div>
-          <h1 className="text-2xl font-display font-bold tracking-tight">Organization Settings</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage your organization details and view statistics</p>
-        </div>
-      </FadeIn>
+    <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
+      <FadeIn><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-2xl font-display font-bold tracking-tight">Organization Hierarchy</h1><p className="text-sm text-muted-foreground mt-1">Manage parent organizations, organizations, and departments.</p></div><Button asChild variant="outline"><Link href="/admin/organization/departments"><Settings2 className="w-4 h-4 mr-2" />Manage Departments</Link></Button></div></FadeIn>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <FadeIn delay={0.05}>
-          <Card className="border-border/50">
-            <CardContent className="pt-5 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Building2 className="w-4 h-4 text-primary" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Slug</p>
-                  <p className="text-sm font-mono">{org?.slug ?? '—'}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <Card className="border-border/50">
-            <CardContent className="pt-5 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <Users className="w-4 h-4 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Members</p>
-                  <p className="text-xl font-bold">{org?._count?.users ?? 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </FadeIn>
-        <FadeIn delay={0.15}>
-          <Card className="border-border/50">
-            <CardContent className="pt-5 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-orange-500/10 flex items-center justify-center">
-                  <AlertTriangle className="w-4 h-4 text-orange-500" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Threats</p>
-                  <p className="text-xl font-bold">{org?._count?.threats ?? 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </FadeIn>
-      </div>
-
-      <FadeIn delay={0.2}>
-        <Card className="border-border/50">
-          <CardHeader>
-            <CardTitle className="text-base">Organization Details</CardTitle>
-            <CardDescription>Update your organization name</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Organization Name</Label>
-              <Input value={name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)} />
-            </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Calendar className="w-3.5 h-3.5" />
-              Created: {org?.createdAt ? new Date(org.createdAt).toLocaleDateString() : '—'}
-            </div>
-            <Button onClick={handleSave} loading={saving} className="gap-2">
-              <Save className="w-4 h-4" /> Save Changes
-            </Button>
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Create Parent Organization</CardTitle><CardDescription>Top-level customer, holding company, or enterprise.</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <Label>Parent Name</Label><Input value={parentName} onChange={(event) => setParentName(event.target.value)} placeholder="Acme Holdings" />
+            <Button className="w-full" disabled={saving || !parentName.trim()} onClick={async () => { if (await post({ action: 'createParent', name: parentName }, 'Parent organization created')) setParentName(''); }}><Plus className="w-4 h-4 mr-2" />Create Parent</Button>
           </CardContent>
         </Card>
-      </FadeIn>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Create Organization</CardTitle><CardDescription>Create an organization under a parent. A General department is added automatically.</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <Label>Parent</Label>
+            <select className="w-full h-10 rounded-md border bg-background px-3 text-sm" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">Select parent</option>{parents.map((parent) => <option key={parent.id} value={parent.id}>{parent.name}</option>)}</select>
+            <Label>Organization Name</Label><Input value={orgName} onChange={(event) => setOrgName(event.target.value)} placeholder="Acme Security" />
+            <Button className="w-full" disabled={saving || !parentId || !orgName.trim()} onClick={async () => { if (await post({ action: 'createOrg', name: orgName, parentOrganizationId: parentId }, 'Organization created')) setOrgName(''); }}><Plus className="w-4 h-4 mr-2" />Create Organization</Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {unassigned.length > 0 && <Card className="border-amber-500/40"><CardHeader><CardTitle className="text-base">Organizations Without Parents</CardTitle><CardDescription>{unassigned.length} organization(s) still need migration.</CardDescription></CardHeader></Card>}
+
+      <div className="space-y-4">
+        {parents.map((parent) => (
+          <Card key={parent.id}>
+            <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="w-5 h-5 text-primary" />{parent.name}</CardTitle><CardDescription className="font-mono">{parent.slug}</CardDescription></CardHeader>
+            <CardContent className="space-y-4">
+              {parent.organizations.map((org) => <DepartmentPanel key={org.id} organization={org} saving={saving} onAddDepartment={async (name) => post({ action: 'createDepartment', organizationId: org.id, name }, 'Department created')} />)}
+              {parent.organizations.length === 0 && <p className="text-sm text-muted-foreground">No organizations under this parent.</p>}
+            </CardContent>
+          </Card>
+        ))}
+        {parents.length === 0 && <Card className="border-dashed"><CardContent className="py-12 text-center text-sm text-muted-foreground">Create the first parent organization to begin.</CardContent></Card>}
+      </div>
     </div>
   );
+}
+
+function DepartmentPanel({ organization, saving, onAddDepartment }: { organization: OrganizationSummary; saving: boolean; onAddDepartment: (name: string) => Promise<boolean> }) {
+  const [name, setName] = useState('');
+  return (
+    <div className="rounded-lg border p-4 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div><p className="font-semibold">{organization.name}</p><p className="text-xs text-muted-foreground font-mono">{organization.slug}</p></div>
+        <div className="text-xs text-muted-foreground">{organization._count?.users ?? 0} members · {organization._count?.threats ?? 0} threats</div>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {(organization.departments ?? []).map((department) => <div key={department.id} className="rounded-md bg-muted/50 p-3"><p className="text-sm font-medium">{department.name}</p><p className="text-xs text-muted-foreground">{department._count?.users ?? 0} members · {department._count?.threats ?? 0} threats</p></div>)}
+        {(organization.departments ?? []).length === 0 && <p className="text-sm text-muted-foreground">No departments.</p>}
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2 border-t pt-4">
+        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={`Add department to ${organization.name}`} maxLength={120} />
+        <Button disabled={saving || !name.trim()} onClick={async () => { if (await onAddDepartment(name.trim())) setName(''); }}><Plus className="w-4 h-4 mr-2" />Add Department</Button>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, icon: Icon }: { label: string; value: number; icon: typeof Building2 }) {
+  return <Card><CardContent className="pt-5 pb-4 flex items-center gap-3"><Icon className="w-5 h-5 text-primary" /><div><p className="text-xs text-muted-foreground">{label}</p><p className="text-xl font-bold">{value}</p></div></CardContent></Card>;
 }
