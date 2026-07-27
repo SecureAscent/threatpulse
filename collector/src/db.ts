@@ -89,6 +89,66 @@ export interface UpsertResult {
   updated: number;
 }
 
+export async function startCollectorRun(source: string): Promise<string> {
+  const id = generateId();
+  await pool.query(
+    `INSERT INTO "CollectorRun" (
+       id, source, status, "startedAt", "itemsFound", "itemsNew",
+       "itemsUpdated", "itemsSkipped"
+     ) VALUES ($1, $2, 'running', NOW(), 0, 0, 0, 0)`,
+    [id, source],
+  );
+  return id;
+}
+
+export async function completeCollectorRun(
+  id: string,
+  result: {
+    itemsFound: number;
+    itemsNew: number;
+    itemsUpdated: number;
+    itemsSkipped: number;
+    durationMs: number;
+  },
+): Promise<void> {
+  await pool.query(
+    `UPDATE "CollectorRun"
+     SET status = 'success',
+         "completedAt" = NOW(),
+         "itemsFound" = $2,
+         "itemsNew" = $3,
+         "itemsUpdated" = $4,
+         "itemsSkipped" = $5,
+         "durationMs" = $6,
+         "errorMessage" = NULL
+     WHERE id = $1`,
+    [
+      id,
+      result.itemsFound,
+      result.itemsNew,
+      result.itemsUpdated,
+      result.itemsSkipped,
+      result.durationMs,
+    ],
+  );
+}
+
+export async function failCollectorRun(
+  id: string,
+  errorMessage: string,
+  durationMs: number,
+): Promise<void> {
+  await pool.query(
+    `UPDATE "CollectorRun"
+     SET status = 'error',
+         "completedAt" = NOW(),
+         "durationMs" = $2,
+         "errorMessage" = $3
+     WHERE id = $1`,
+    [id, durationMs, errorMessage.slice(0, 4000)],
+  );
+}
+
 /**
  * Upsert a batch of threats using the tenant-scoped unique key.
  * Analyst workflow status is preserved on updates.
