@@ -53,7 +53,7 @@ jobs:
           git --version
           docker --version
           docker compose version
-          make --version | head -n 1
+          make --version | sed -n '1p'
 
       - name: Validate production Compose definition safely
         shell: bash
