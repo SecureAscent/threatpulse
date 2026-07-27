@@ -20,14 +20,14 @@ jobs:
   inspect:
     name: Inspect ThreatPulse Docker host
     runs-on: self-hosted
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Check out requested ref
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
           clean: true
 
       - name: Verify repository context
@@ -53,7 +53,7 @@ jobs:
           git --version
           docker --version
           docker compose version
-          make --version | head -n 1
+          make --version | sed -n '1p'
 
       - name: Validate production Compose definition safely
         shell: bash
