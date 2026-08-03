@@ -1,0 +1,1 @@
+{"name":"User","type":"object","properties":{"full_name":{"type":"string","title":"Full Name"},"role":{"type":"string","enum":["superadmin","admin","analyst","user"],"default":"user","title":"Role"}},"required":[],"rls":{}}
