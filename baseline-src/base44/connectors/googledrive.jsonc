@@ -1,0 +1,4 @@
+{
+  "type": "googledrive",
+  "scopes": ["https://www.googleapis.com/auth/drive.file", "email"]
+}
