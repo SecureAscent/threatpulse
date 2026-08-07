@@ -57,26 +57,23 @@ export async function POST(req: NextRequest) {
     const clash = await prisma.organization.findUnique({ where: { slug }, select: { id: true } });
     if (clash) return NextResponse.json({ error: 'Slug already in use' }, { status: 409 });
 
-    const department = body?.department ? String(body.department).trim() || null : null;
-
-    let parentId: string | null = null;
-    if (body?.parentId) {
-      const parentOrg = await prisma.organization.findUnique({
-        where: { id: String(body.parentId) },
+    let parentOrganizationId: string | null = null;
+    if (body?.parentOrganizationId) {
+      const parentOrg = await prisma.parentOrganization.findUnique({
+        where: { id: String(body.parentOrganizationId) },
         select: { id: true },
       });
       if (!parentOrg) return NextResponse.json({ error: 'Parent organization not found' }, { status: 404 });
-      parentId = parentOrg.id;
+      parentOrganizationId = parentOrg.id;
     }
 
     const organization = await prisma.organization.create({
-      data: { name, slug, department, parentId },
+      data: { name, slug, parentOrganizationId },
       select: {
         id: true,
         name: true,
         slug: true,
-        department: true,
-        parentId: true,
+        parentOrganizationId: true,
         createdAt: true,
         _count: { select: { users: true, threats: true } },
       },
