@@ -5,7 +5,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:tenancy": "tsx --test tests/tenant-context.test.ts",
+    "db:push": "prisma db push --schema=./prisma/schema.prisma --skip-generate",
+    "db:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "hierarchy:migrate": "tsx scripts/migrate-hierarchy.ts",
+    "db:tenancy-recover": "npm run db:push && npm run hierarchy:migrate"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/safe-seed.ts"
