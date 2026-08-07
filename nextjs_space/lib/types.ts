@@ -5,10 +5,6 @@ export interface SessionUser {
   role: string;
   organizationId: string | null;
   organizationName: string | null;
-  departmentId: string | null;
-  departmentName: string | null;
-  parentOrganizationId: string | null;
-  parentOrganizationName: string | null;
 }
 
 export interface ThreatItem {
@@ -28,11 +24,12 @@ export interface ThreatItem {
   dateAdded: string;
   lastUpdated: string;
   organizationId: string;
-  departmentId: string | null;
+  // --- Analyst workflow (Track B) ---
   assignedToId?: string | null;
   assignedTo?: AnalystRef | null;
   dueDate?: string | null;
   tags?: string[];
+  // --- Intelligence engine (Track A) ---
   riskScore?: number | null;
   epssScore?: number | null;
   epssPercentile?: number | null;
@@ -85,53 +82,21 @@ export interface SavedFilterItem {
   owned?: boolean;
 }
 
-export interface DepartmentSummary {
+export interface OrgUser {
   id: string;
-  name: string;
-  slug: string;
-  organizationId: string;
-  _count?: { users: number; threats: number };
-}
-
-export interface OrganizationSummary {
-  id: string;
-  name: string;
-  slug: string;
-  parentOrganizationId: string | null;
-  createdAt?: string;
-  departments?: DepartmentSummary[];
-  _count?: {
-    users: number;
-    threats: number;
-    departments?: number;
-  };
-}
-
-export interface ParentOrganizationSummary {
-  id: string;
-  name: string;
-  slug: string;
-  createdAt?: string;
-  organizations: OrganizationSummary[];
+  name: string | null;
+  email: string;
+  role: string;
+  createdAt: string;
+  organizationId?: string | null;
+  organization?: { id: string; name: string } | null;
 }
 
 export interface AdminOrganization {
   id: string;
   name: string;
   slug: string;
-  _count?: { users: number; threats?: number };
-}
-
-export interface OrgUser {
-  id: string;
-  name: string | null;
-  email: string;
-  role: string;
-  organizationId: string | null;
-  departmentId: string | null;
-  organization: Pick<OrganizationSummary, 'id' | 'name' | 'slug'> | null;
-  department: Pick<DepartmentSummary, 'id' | 'name' | 'slug'> | null;
-  createdAt: string;
+  _count?: { users: number };
 }
 
 export interface DashboardStats {

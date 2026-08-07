@@ -1,101 +1,196 @@
-import type { Prisma } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import {
-  hasPermission as roleHasPermission,
-  normalizeAppRole,
-  type AppRole,
-} from '@/lib/rbac';
+import { prisma } from '@/lib/db';
+import { sha256 } from '@/lib/crypto';
 
-export type TenantRole = AppRole;
+/**
+ * Unified tenant/auth context resolution for API routes.
+ *
+ * A request may be authenticated either by an interactive NextAuth session
+ * (a signed-in user) or by an API key presented as `Authorization: Bearer tp_...`.
+ * `getTenantContext()` normalises both into a single shape so route handlers
+ * can enforce permissions consistently.
+ */
 
-export type TenantPermission =
+export type Role =
+  | 'VIEWER'
+  | 'ANALYST'
+  | 'DEPARTMENT_ADMIN'
+  | 'ADMIN'
+  | 'PARENT_ADMIN'
+  | 'SUPERADMIN';
+
+export type Permission =
   | 'threats.read'
   | 'threats.manage'
-  | 'threats.create'
-  | 'threats.update'
-  | 'threats.delete'
-  | 'organizations.manage'
+  | 'assets.read'
+  | 'assets.manage'
+  | 'integrations.manage'
   | 'users.manage'
-  | 'integrations.manage';
+  | 'organizations.manage'
+  | 'departments.manage'
+  | 'audit.read'
+  | 'platform.manage';
+
+const ALL_PERMISSIONS: Permission[] = [
+  'threats.read',
+  'threats.manage',
+  'assets.read',
+  'assets.manage',
+  'integrations.manage',
+  'users.manage',
+  'organizations.manage',
+  'departments.manage',
+  'audit.read',
+  'platform.manage',
+];
+
+/** Role → granted permissions. Higher roles are supersets of lower ones. */
+const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
+  VIEWER: ['threats.read', 'assets.read'],
+  ANALYST: ['threats.read', 'threats.manage', 'assets.read', 'assets.manage'],
+  DEPARTMENT_ADMIN: [
+    'threats.read',
+    'threats.manage',
+    'assets.read',
+    'assets.manage',
+    'users.manage',
+    'audit.read',
+  ],
+  ADMIN: [
+    'threats.read',
+    'threats.manage',
+    'assets.read',
+    'assets.manage',
+    'integrations.manage',
+    'users.manage',
+    'organizations.manage',
+    'departments.manage',
+    'audit.read',
+  ],
+  PARENT_ADMIN: [
+    'threats.read',
+    'threats.manage',
+    'assets.read',
+    'assets.manage',
+    'integrations.manage',
+    'users.manage',
+    'organizations.manage',
+    'departments.manage',
+    'audit.read',
+  ],
+  SUPERADMIN: ALL_PERMISSIONS,
+};
 
 export interface TenantContext {
-  userId: string;
-  email?: string;
-  role: TenantRole;
-  organizationId: string;
-  departmentId: string | null;
-  parentOrganizationId: string | null;
+  source: 'session' | 'apikey';
+  userId: string | null;
+  email: string | null;
+  organizationId: string | null;
+  role: Role;
+  /** Explicit permission set (derived from role, or from API key scopes). */
+  permissions: Permission[];
+  /** For API-key requests only: the key id, for audit trails. */
+  apiKeyId?: string;
 }
 
-const TENANT_PERMISSION_MAP = {
-  'threats.read': 'threats.read',
-  'threats.manage': 'threats.manage',
-  'threats.create': 'threats.manage',
-  'threats.update': 'threats.manage',
-  'threats.delete': 'threats.manage',
-  'organizations.manage': 'organizations.manage',
-  'users.manage': 'users.manage',
-  'integrations.manage': 'integrations.manage',
-} as const;
-
-export async function getTenantContext(_request?: unknown): Promise<TenantContext | null> {
-  const session = await getServerSession(authOptions);
-  const user = session?.user as any;
-
-  if (!user?.id || !user?.organizationId || user?.accessRevoked) return null;
-
-  return {
-    userId: String(user.id),
-    email: String(user.email ?? ''),
-    role: normalizeAppRole(user.role),
-    organizationId: String(user.organizationId),
-    departmentId: user.departmentId ? String(user.departmentId) : null,
-    parentOrganizationId: user.parentOrganizationId
-      ? String(user.parentOrganizationId)
-      : null,
-  };
+function normaliseRole(role: string | null | undefined): Role {
+  const r = (role || 'ANALYST').toUpperCase();
+  if (
+    r === 'VIEWER' ||
+    r === 'ANALYST' ||
+    r === 'DEPARTMENT_ADMIN' ||
+    r === 'ADMIN' ||
+    r === 'PARENT_ADMIN' ||
+    r === 'SUPERADMIN'
+  ) {
+    return r;
+  }
+  return 'ANALYST';
 }
 
-export function hasPermission(
-  context: TenantContext,
-  permission: TenantPermission,
-): boolean {
-  if (permission === 'threats.delete') {
-    return ['ADMIN', 'PARENT_ADMIN', 'SUPERADMIN'].includes(context.role);
+export function permissionsForRole(role: Role): Permission[] {
+  return ROLE_PERMISSIONS[role] ?? [];
+}
+
+/**
+ * Resolve the tenant context for an incoming request.
+ *
+ * @param req Optional Request/NextRequest. Required to support API-key auth
+ *            (the Authorization header is read from it). When omitted, only
+ *            interactive session auth is attempted.
+ */
+export async function getTenantContext(req?: Request): Promise<TenantContext | null> {
+  // 1) API key auth (machine-to-machine)
+  const authHeader = req?.headers?.get('authorization') || '';
+  if (authHeader.toLowerCase().startsWith('bearer tp_')) {
+    const rawKey = authHeader.slice(7).trim(); // strip "Bearer "
+    const keyHash = sha256(rawKey);
+    const key = await prisma.apiKey.findUnique({ where: { keyHash } });
+    if (
+      !key ||
+      key.revokedAt ||
+      (key.expiresAt && key.expiresAt.getTime() < Date.now())
+    ) {
+      return null;
+    }
+    // Best-effort last-used tracking (do not block the request on failure).
+    prisma.apiKey
+      .update({ where: { id: key.id }, data: { lastUsedAt: new Date() } })
+      .catch(() => undefined);
+
+    const scopes = (key.scopes as string[]).filter((s): s is Permission =>
+      (ALL_PERMISSIONS as string[]).includes(s),
+    );
+    return {
+      source: 'apikey',
+      userId: key.createdById,
+      email: null,
+      organizationId: key.organizationId,
+      role: 'ANALYST', // baseline; effective access is governed by scopes
+      permissions: scopes,
+      apiKeyId: key.id,
+    };
   }
 
-  return roleHasPermission(context.role, TENANT_PERMISSION_MAP[permission]);
-}
-
-export function buildThreatScope(
-  context: TenantContext,
-): Prisma.ThreatWhereInput {
+  // 2) Interactive session auth
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return null;
+  const u = session.user as any;
+  const role = normaliseRole(u.role);
   return {
-    organizationId: context.organizationId,
-    ...(context.departmentId
-      ? { OR: [{ departmentId: context.departmentId }, { departmentId: null }] }
-      : {}),
+    source: 'session',
+    userId: u.id ?? null,
+    email: u.email ?? null,
+    organizationId: u.organizationId ?? null,
+    role,
+    permissions: permissionsForRole(role),
   };
 }
 
-export function canAssignDepartment(context: TenantContext): boolean {
-  return ['ADMIN', 'PARENT_ADMIN', 'SUPERADMIN'].includes(context.role);
+/** Does this context hold the given permission? */
+export function hasPermission(ctx: TenantContext | null, permission: Permission): boolean {
+  if (!ctx) return false;
+  return ctx.permissions.includes(permission);
 }
 
-export function isAdmin(context: TenantContext): boolean {
-  return ['DEPARTMENT_ADMIN', 'ADMIN', 'PARENT_ADMIN', 'SUPERADMIN'].includes(
-    context.role,
-  );
+/** True when the context's role is one of the accepted roles (session only). */
+export function hasRole(ctx: TenantContext | null, ...roles: Role[]): boolean {
+  if (!ctx) return false;
+  return roles.includes(ctx.role);
 }
 
-export function hasRole(
-  context: TenantContext,
-  ...roles: TenantRole[]
-): boolean {
-  return roles.includes(context.role);
+/** Convenience: admin-tier roles. */
+export function isAdmin(ctx: TenantContext | null): boolean {
+  return hasRole(ctx, 'ADMIN', 'PARENT_ADMIN', 'SUPERADMIN');
 }
 
-export function normalizeRole(role: unknown): TenantRole {
-  return normalizeAppRole(role);
+/**
+ * Build a Prisma `where` fragment scoping a query to the caller's tenant.
+ * SUPERADMIN sees all organizations; everyone else is pinned to their org.
+ */
+export function buildOrgScope(ctx: TenantContext | null): { organizationId?: string } {
+  if (!ctx) return { organizationId: '__none__' };
+  if (ctx.role === 'SUPERADMIN' && ctx.source === 'session') return {};
+  return { organizationId: ctx.organizationId ?? '__none__' };
 }

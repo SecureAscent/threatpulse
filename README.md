@@ -34,7 +34,7 @@ ThreatPulse Intel aggregates, normalizes, and triages threat intelligence into a
 
 ```bash
 # 1. Clone
-git clone https://github.com/EyesMindOpen/threatpulse.git
+git clone https://github.com/SecureAscent/threatpulse.git
 cd threatpulse
 
 # 2. Create and edit the environment file

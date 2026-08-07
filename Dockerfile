@@ -6,19 +6,17 @@
 # -- Base --------------------------------------------------------------------
 FROM node:22-alpine AS base
 # wget (busybox) is used by the container HEALTHCHECK; netcat by the entrypoint
-RUN apk add --no-cache libc6-compat openssl wget netcat-openbsd && \
-    corepack enable && \
-    corepack prepare yarn@4.9.2 --activate
+RUN apk add --no-cache libc6-compat openssl wget netcat-openbsd
 
 # -- Install dependencies ----------------------------------------------------
 FROM base AS deps
 WORKDIR /app
 
-# Use the repository's Yarn Berry lockfile with an explicit node_modules linker.
+# Copy the real package.json (follows symlink) and lockfile
 COPY nextjs_space/package.json ./package.json
-COPY nextjs_space/yarn.lock ./yarn.lock
-COPY nextjs_space/.yarnrc.yml ./.yarnrc.yml
-RUN yarn install --immutable
+# Copy lockfile if it exists (may be a symlink too)
+COPY nextjs_space/yarn.lock* ./
+RUN yarn install --frozen-lockfile --production=false 2>/dev/null || yarn install --production=false
 
 # -- Build -------------------------------------------------------------------
 FROM base AS builder

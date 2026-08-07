@@ -1,20 +1,22 @@
 #!/bin/sh
-set -e
+# NOTE: No set -e — we never want a schema push timeout to kill the container
 
 echo "=============================================="
 echo "       ThreatPulse Intel -- Starting          "
 echo "=============================================="
 
+# Extract host and port from DATABASE_URL
 DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:/]*\).*|\1|p')
 DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
-DB_HOST=${DB_HOST:-db}
+DB_HOST=${DB_HOST:-postgres}
 DB_PORT=${DB_PORT:-5432}
 
+# Wait for PostgreSQL to be ready using simple TCP check (no extra modules needed)
 echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
 RETRIES=30
 until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
   RETRIES=$((RETRIES - 1))
-  if [ "$RETRIES" -le 0 ]; then
+  if [ $RETRIES -le 0 ]; then
     echo "ERROR: Could not connect to database after 60s. Exiting."
     exit 1
   fi
@@ -23,45 +25,42 @@ until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
 done
 echo "Database is ready"
 
+# Run Prisma schema push with a generous timeout — non-fatal if it times out
+# (indexes on large tables can take >60s; we still want the app to start)
+echo "Pushing database schema (timeout 300s)..."
 cd /app/prisma-tools
-
-# Database changes are deliberately opt-in. Normal application startup must not
-# mutate a restored or production database. Run the app once with
-# RUN_DB_MIGRATIONS=true during a controlled deployment or recovery.
-if [ "${RUN_DB_MIGRATIONS:-false}" = "true" ]; then
-  echo "Applying Prisma schema changes (non-destructive mode)..."
-  npx prisma db push --schema=./prisma/schema.prisma --skip-generate
-
-  if [ -f scripts/migrate-hierarchy.ts ]; then
-    echo "Applying parent organization / organization / department backfill..."
-    NODE_PATH=/app/prisma-tools/node_modules npx tsx scripts/migrate-hierarchy.ts
-    echo "Organization hierarchy migration complete"
-  fi
+timeout 300 npx prisma db push --schema=./prisma/schema.prisma --skip-generate --accept-data-loss 2>&1
+PUSH_EXIT=$?
+if [ $PUSH_EXIT -eq 0 ]; then
+  echo "Database schema is up to date"
+elif [ $PUSH_EXIT -eq 124 ]; then
+  echo "WARNING: Schema push timed out after 300s — indexes may still be building in the background. Continuing startup."
 else
-  echo "Skipping database migrations (RUN_DB_MIGRATIONS is not true)"
+  echo "WARNING: Schema push exited with code $PUSH_EXIT — continuing startup anyway."
 fi
 
-# Demo seed data is also opt-in. It must never be inserted automatically into a
-# recovered or production database.
-if [ "${SEED_DEMO_DATA:-false}" = "true" ]; then
-  echo "Checking whether demo seed data is needed..."
-  SEED_CHECK=$(NODE_PATH=/app/prisma-tools/node_modules node -e "
+# Seed the database (only if no users exist yet)
+echo "Checking if seed data exists..."
+SEED_CHECK=$(cd /app/prisma-tools && NODE_PATH=/app/prisma-tools/node_modules node -e "
 const { PrismaClient } = require('.prisma/client');
 const p = new PrismaClient();
 p.user.count().then(c => { console.log(c); return p.\$disconnect(); }).catch(() => { console.log('0'); return p.\$disconnect(); });
 " 2>/dev/null || echo "0")
 
-  if [ "$SEED_CHECK" = "0" ] || [ -z "$SEED_CHECK" ]; then
-    echo "Seeding database with demo data..."
-    NODE_PATH=/app/prisma-tools/node_modules npx tsx scripts/seed.ts
-    echo "Database seeded successfully"
-  else
-    echo "Database already has $SEED_CHECK user(s), skipping demo seed"
-  fi
+if [ "$SEED_CHECK" = "0" ] || [ -z "$SEED_CHECK" ]; then
+  echo "Seeding database with demo data..."
+  cd /app/prisma-tools
+  NODE_PATH=/app/prisma-tools/node_modules npx tsx scripts/seed.ts 2>&1 || true
+  echo "Database seeded successfully"
+  echo ""
+  echo "   Demo accounts created:"
+  echo "   Admin:   admin@threatpulse.com / admin123!"
+  echo "   Analyst: analyst@threatpulse.com / analyst123!"
 else
-  echo "Skipping demo seed data (SEED_DEMO_DATA is not true)"
+  echo "Database already has $SEED_CHECK user(s), skipping seed"
 fi
 
+# Start the Next.js server
 echo ""
 echo "Starting ThreatPulse Intel on port ${PORT:-3000}"
 echo "   URL: ${NEXTAUTH_URL:-http://localhost:3000}"

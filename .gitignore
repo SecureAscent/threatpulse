@@ -20,6 +20,13 @@ collector/node_modules/
 
 # Logs
 *.log
-node_modules/
+<<<<<<< HEAD
 
-nextjs_space/.yarn/
+# Private keys / certs
+*.pem
+nextjs_space/.yarn/install-state.gz
+=======
+node_modules/
+nextjs_space/node_modules/
+>>>>>>> 721a45efc (Untrack node_modules; local docker + API changes)
+nextjs_space/.yarn/cache/

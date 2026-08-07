@@ -1,58 +1,38 @@
-import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import type { TenantContext } from '@/lib/tenant-context';
 
-export interface WriteAuditEventInput {
-  context?: TenantContext;
-  ctx?: TenantContext;
-  action: string;
-  entityType?: string;
-  entityId?: string | null;
-  targetType?: string;
-  targetId?: string | null;
-  departmentId?: string | null;
-  metadata?: Prisma.InputJsonValue;
-  userId?: string | null;
+/**
+ * Append an entry to the audit trail. Never throws — auditing must not break
+ * the operation it is recording. Failures are logged to the console instead.
+ */
+export interface AuditEventInput {
+  action: string; // e.g. "mfa.enabled", "apikey.created"
+  ctx?: TenantContext | null;
   organizationId?: string | null;
+  userId?: string | null;
   actorEmail?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata?: Record<string, unknown> | null;
   ipAddress?: string | null;
 }
 
-export async function writeAuditEvent(input: WriteAuditEventInput): Promise<void> {
+export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
   try {
-    if (input.context) {
-      const { context, action, entityType, entityId, departmentId, metadata } = input;
-      await prisma.auditEvent.create({
-        data: {
-          organizationId: context.organizationId,
-          actorUserId: context.userId,
-          actorRole: context.role,
-          action,
-          entityType: entityType ?? input.targetType ?? 'Unknown',
-          entityId: entityId ?? input.targetId ?? null,
-          departmentId: departmentId ?? context.departmentId,
-          metadata: metadata ?? undefined,
-        },
-      });
-      return;
-    }
-
-    const context = input.ctx;
     await prisma.auditLog.create({
       data: {
-        organizationId: context?.organizationId ?? input.organizationId ?? null,
-        userId: context?.userId ?? input.userId ?? null,
-        actorEmail: context?.email || input.actorEmail || null,
         action: input.action,
-        targetType: input.targetType ?? input.entityType ?? null,
-        targetId: input.targetId ?? input.entityId ?? null,
-        metadata:
-          input.metadata === undefined ? null : JSON.stringify(input.metadata),
+        organizationId: input.organizationId ?? input.ctx?.organizationId ?? null,
+        userId: input.userId ?? input.ctx?.userId ?? null,
+        actorEmail: input.actorEmail ?? input.ctx?.email ?? null,
+        targetType: input.targetType ?? null,
+        targetId: input.targetId ?? null,
+        metadata: input.metadata ? JSON.stringify(input.metadata) : null,
         ipAddress: input.ipAddress ?? null,
       },
     });
-  } catch (error) {
-    // Auditing should never expose tenant data or break the primary request.
-    console.error('Failed to write audit event:', error);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[audit] failed to write event', input.action, err);
   }
 }

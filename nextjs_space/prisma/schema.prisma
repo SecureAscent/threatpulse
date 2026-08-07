@@ -1,96 +1,49 @@
 generator client {
-    provider = "prisma-client-js"
-    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
-}
-
-model ParentOrganization {
-  id            String         @id @default(cuid())
-  name          String
-  slug          String         @unique
-  archivedAt    DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  organizations Organization[]
-
-  @@index([archivedAt])
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Organization {
-  id                   String              @id @default(cuid())
-  parentOrganizationId String?
-  name                 String
-  slug                 String              @unique
-  description          String?
-  timezone             String              @default("UTC")
-  setupCompleted       Boolean             @default(false)
-  archivedAt           DateTime?
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
-  parentOrganization   ParentOrganization? @relation(fields: [parentOrganizationId], references: [id])
-  departments          Department[]
-  users                User[]
-  threats              Threat[]
-  integrationConfigs   IntegrationConfig[]
-  auditEvents          AuditEvent[]
-  assets               Asset[]
-  productVersions      ProductVersion[]
-  sbomDocuments        SbomDocument[]
-  softwareComponents   SoftwareComponent[]
-  assetVulnerabilities AssetVulnerability[]
-  syncRuns             ExternalSyncRun[]
-  identityMappings     ExternalIdentityMapping[]
-  jiraTickets          JiraTicket[]
-  cybellumAssets       CybellumAsset[]
-  notificationLogs     NotificationLog[]
-  apiKeys              ApiKey[]
-  auditLogs            AuditLog[]
-  savedFilters         SavedFilter[]
-
-  @@index([parentOrganizationId])
-  @@index([archivedAt])
-}
-
-model Department {
-  id             String       @id @default(cuid())
-  organizationId String
-  name           String
-  slug           String
-  archivedAt     DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  users          User[]
-  threats        Threat[]
-  assets         Asset[]
-
-  @@unique([organizationId, slug])
-  @@index([organizationId])
-  @@index([archivedAt])
+  id                 String              @id @default(cuid())
+  name               String
+  slug               String              @unique
+  department         String?             // e.g. "Security Operations", "IT Risk"
+  parentId           String?             // optional parent org for hierarchical tenants
+  parent             Organization?       @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children           Organization[]      @relation("OrgHierarchy")
+  setupCompleted     Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  users              User[]
+  threats            Threat[]
+  integrationConfigs IntegrationConfig[]
+  jiraTickets        JiraTicket[]
+  cybellumAssets     CybellumAsset[]
+  notificationLogs   NotificationLog[]
+  apiKeys            ApiKey[]
+  auditLogs          AuditLog[]
+  savedFilters       SavedFilter[]
 }
 
 model User {
-  id             String        @id @default(cuid())
-  name           String?
-  email          String        @unique
-  emailVerified  DateTime?
-  image          String?
-  password       String
-  role           String        @default("ANALYST")
-  organizationId String?
-  departmentId   String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  department     Department?   @relation(fields: [departmentId], references: [id])
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  accounts       Account[]
-  sessions       Session[]
-  ownedAssets    Asset[]       @relation("AssetOwnerUser")
-  identityMappings ExternalIdentityMapping[]
+  id                     String                  @id @default(cuid())
+  name                   String?
+  email                  String                  @unique
+  emailVerified          DateTime?
+  image                  String?
+  password               String
+  role                   String                  @default("ANALYST")
+  organizationId         String?
+  organization           Organization?           @relation(fields: [organizationId], references: [id])
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  accounts               Account[]
+  sessions               Session[]
   notificationPreference NotificationPreference?
   notificationLogs       NotificationLog[]
   digestQueue            DigestQueue[]
@@ -99,56 +52,59 @@ model User {
   apiKeys                ApiKey[]                @relation("ApiKeyCreatedBy")
   activeSessions         ActiveSession[]
   auditLogs              AuditLog[]
+  // --- Analyst workflow (Track B) ---
   authoredNotes          ThreatNote[]            @relation("ThreatNoteAuthor")
   statusChanges          ThreatStatusHistory[]   @relation("ThreatStatusChangedBy")
   assignedThreats        Threat[]                @relation("ThreatAssignedTo")
   savedFilters           SavedFilter[]
-
-  @@index([organizationId])
-  @@index([departmentId])
 }
 
 model Threat {
-  id             String        @id @default(cuid())
-  threatId       String
-  title          String
-  type           String
-  severity       String
-  status         String        @default("NEW")
-  description    String?
-  affectedAssets String?
-  source         String?
-  indicators     String?
-  mitreTactic    String?
-  mitreTechnique String?
-  cvssScore      Float?
-  dateAdded      DateTime      @default(now())
-  lastUpdated    DateTime      @updatedAt
-  organizationId String
-  departmentId   String?
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  department     Department?   @relation(fields: [departmentId], references: [id])
+  id               String            @id @default(cuid())
+  threatId         String
+  // NOTE: threats are org-scoped, so the same CVE/news id can exist for
+  // different organizations. Uniqueness is therefore on (organizationId,
+  // threatId), which is also the collector's upsert conflict target.
+  title            String
+  type             String
+  severity         String
+  status           String            @default("NEW")
+  description      String?
+  affectedAssets   String?
+  source           String?
+  indicators       String?
+  mitreTactic      String?
+  mitreTechnique   String?
+  cvssScore        Float?
+  dateAdded        DateTime          @default(now())
+  lastUpdated      DateTime          @updatedAt
+  organizationId   String
+  organization     Organization      @relation(fields: [organizationId], references: [id])
   jiraTickets      JiraTicket[]
   assetLinks       ThreatAssetLink[]
   notificationLogs NotificationLog[]
-  riskScore         Float?
-  epssScore         Float?
-  epssPercentile    Float?
-  epssUpdatedAt     DateTime?
-  isKev             Boolean               @default(false)
-  exploitAvailable  Boolean               @default(false)
-  mitreAttackIds    String[]               @default([])
-  sourceUrls        String[]               @default([])
-  dedupKey           String?
-  duplicateOf       String?
-  enrichedAt        DateTime?
-  assignedToId      String?
-  assignedTo        User?                 @relation("ThreatAssignedTo", fields: [assignedToId], references: [id])
-  dueDate            DateTime?
-  tags               String[]               @default([])
-  notes              ThreatNote[]
-  statusHistory      ThreatStatusHistory[]
-  complianceTags     ComplianceTag[]
+
+  // --- Intelligence engine (Track A) ---
+  riskScore        Float? // ThreatPulse composite risk score 0-100
+  epssScore        Float? // EPSS probability 0-1
+  epssPercentile   Float? // EPSS percentile 0-1
+  epssUpdatedAt    DateTime?
+  isKev            Boolean   @default(false) // present in CISA KEV catalog
+  exploitAvailable Boolean   @default(false)
+  mitreAttackIds   String[] // e.g. ["T1190", "T1133"]
+  sourceUrls       String[] // deduplicated source URLs
+  dedupKey         String? // canonical dedup key (normalized CVE id, etc.)
+  duplicateOf      String? // if a duplicate, points to primary threat id
+  enrichedAt       DateTime?
+
+  // --- Analyst workflow (Track B) ---
+  assignedToId  String?
+  assignedTo    User?                 @relation("ThreatAssignedTo", fields: [assignedToId], references: [id])
+  dueDate       DateTime?
+  tags          String[]
+  notes         ThreatNote[]
+  statusHistory ThreatStatusHistory[]
+  complianceTags ComplianceTag[]
 
   @@unique([organizationId, threatId])
   @@index([organizationId, type])
@@ -162,6 +118,78 @@ model Threat {
   @@index([isKev])
 }
 
+// ---------------------------------------------------------------------------
+// Intelligence engine (Track A) — collector observability
+// ---------------------------------------------------------------------------
+
+model CollectorRun {
+  id           String    @id @default(cuid())
+  source       String // "cisa_kev", "nvd", "rss_bleeping", etc.
+  status       String // "running", "success", "error"
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  itemsFound   Int       @default(0)
+  itemsNew     Int       @default(0)
+  itemsUpdated Int       @default(0)
+  itemsSkipped Int       @default(0)
+  errorMessage String?
+  durationMs   Int?
+
+  @@index([source])
+  @@index([status])
+  @@index([startedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Analyst workflow (Track B)
+// ---------------------------------------------------------------------------
+
+model ThreatNote {
+  id         String   @id @default(cuid())
+  threatId   String
+  threat     Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation("ThreatNoteAuthor", fields: [authorId], references: [id])
+  content    String
+  isInternal Boolean  @default(false) // internal analyst notes vs shared
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([threatId])
+  @@index([authorId])
+}
+
+model ThreatStatusHistory {
+  id          String   @id @default(cuid())
+  threatId    String
+  threat      Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
+  changedById String
+  changedBy   User     @relation("ThreatStatusChangedBy", fields: [changedById], references: [id])
+  fromStatus  String
+  toStatus    String
+  note        String? // reason for change
+  createdAt   DateTime @default(now())
+
+  @@index([threatId])
+  @@index([changedById])
+}
+
+model SavedFilter {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  filters        Json // { type, severity, status, search, assignedToMe, dateRange, etc. }
+  isShared       Boolean      @default(false) // visible to whole org
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([organizationId])
+}
+
 model IntegrationConfig {
   id             String       @id @default(cuid())
   organizationId String
@@ -171,249 +199,9 @@ model IntegrationConfig {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
-  syncRuns       ExternalSyncRun[]
 
   @@unique([organizationId, integrationId])
   @@index([organizationId])
-}
-
-model Asset {
-  id                 String       @id @default(cuid())
-  organizationId     String
-  departmentId       String?
-  ownerUserId         String?
-  externalSource     String
-  externalId         String
-  assetType           String
-  name                String
-  description         String?
-  vendor              String?
-  productFamily       String?
-  model                String?
-  currentVersion       String?
-  ownerName            String?
-  ownerEmail           String?
-  businessUnit         String?
-  criticality          String?
-  lifecycleStatus      String?
-  sourceStatus         String?
-  sourceUpdatedAt      DateTime?
-  sourceDeletedAt      DateTime?
-  lastSeenAt           DateTime?
-  lastSyncedAt         DateTime?
-  rawMetadata          Json?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
-  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  department           Department?  @relation(fields: [departmentId], references: [id])
-  ownerUser            User?        @relation("AssetOwnerUser", fields: [ownerUserId], references: [id])
-  productVersions      ProductVersion[]
-  vulnerabilities      AssetVulnerability[]
-
-  @@unique([organizationId, externalSource, externalId])
-  @@index([organizationId, assetType])
-  @@index([organizationId, businessUnit])
-  @@index([organizationId, criticality])
-  @@index([organizationId, lifecycleStatus])
-  @@index([departmentId])
-  @@index([ownerUserId])
-}
-
-model ProductVersion {
-  id                 String       @id @default(cuid())
-  organizationId     String
-  assetId             String
-  externalSource      String
-  externalId          String
-  version             String
-  releaseName         String?
-  lifecycleStatus     String?
-  releaseDate         DateTime?
-  endOfSupportDate    DateTime?
-  sourceUpdatedAt     DateTime?
-  lastSeenAt          DateTime?
-  rawMetadata          Json?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
-  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  asset               Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  sbomDocuments       SbomDocument[]
-  vulnerabilities    AssetVulnerability[]
-
-  @@unique([organizationId, externalSource, externalId])
-  @@index([organizationId, assetId])
-  @@index([organizationId, lifecycleStatus])
-}
-
-model SbomDocument {
-  id                 String       @id @default(cuid())
-  organizationId     String
-  productVersionId   String
-  externalSource     String
-  externalId         String
-  format              String
-  specVersion         String?
-  serialNumber        String?
-  documentVersion     Int?
-  generatedAt         DateTime?
-  sourceUpdatedAt     DateTime?
-  lastSeenAt          DateTime?
-  checksum            String?
-  rawDocument         Json?
-  rawMetadata         Json?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
-  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  productVersion      ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
-  components          SbomComponent[]
-
-  @@unique([organizationId, externalSource, externalId])
-  @@index([organizationId, productVersionId])
-  @@index([organizationId, generatedAt])
-}
-
-model SoftwareComponent {
-  id                 String       @id @default(cuid())
-  organizationId     String
-  externalSource     String
-  externalId         String
-  name                String
-  version             String?
-  supplier            String?
-  componentType       String?
-  purl                 String?
-  cpe                  String?
-  swid                 String?
-  licenseExpression    String?
-  sourceUpdatedAt      DateTime?
-  lastSeenAt           DateTime?
-  rawMetadata          Json?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
-  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sbomMemberships     SbomComponent[]
-  vulnerabilities    AssetVulnerability[]
-
-  @@unique([organizationId, externalSource, externalId])
-  @@index([organizationId, name, version])
-  @@index([organizationId, purl])
-  @@index([organizationId, cpe])
-}
-
-model SbomComponent {
-  id                 String            @id @default(cuid())
-  sbomDocumentId     String
-  componentId        String
-  relationshipType   String?
-  scope               String?
-  directDependency    Boolean?
-  rawMetadata          Json?
-  createdAt            DateTime          @default(now())
-  sbomDocument        SbomDocument      @relation(fields: [sbomDocumentId], references: [id], onDelete: Cascade)
-  component           SoftwareComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
-
-  @@unique([sbomDocumentId, componentId])
-  @@index([componentId])
-}
-
-model AssetVulnerability {
-  id                 String            @id @default(cuid())
-  organizationId     String
-  assetId             String
-  productVersionId   String?
-  componentId        String?
-  externalSource     String
-  externalId         String
-  vulnerabilityId    String
-  status              String?
-  vexStatus           String?
-  severity            String?
-  cvssScore           Float?
-  epssScore           Float?
-  kev                  Boolean?
-  exploitable          Boolean?
-  firstSeenAt          DateTime?
-  lastSeenAt           DateTime?
-  sourceUpdatedAt      DateTime?
-  remediation         String?
-  rawMetadata          Json?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  organization        Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  asset               Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  productVersion      ProductVersion?   @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
-  component           SoftwareComponent? @relation(fields: [componentId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, externalSource, externalId])
-  @@index([organizationId, vulnerabilityId])
-  @@index([organizationId, severity])
-  @@index([organizationId, kev])
-  @@index([assetId])
-  @@index([productVersionId])
-  @@index([componentId])
-}
-
-model ExternalSyncRun {
-  id                   String             @id @default(cuid())
-  organizationId       String
-  integrationConfigId  String
-  provider              String
-  syncType              String
-  status                String             @default("PENDING")
-  cursorBefore          String?
-  cursorAfter           String?
-  startedAt             DateTime           @default(now())
-  completedAt           DateTime?
-  recordsRead           Int                @default(0)
-  recordsCreated        Int                @default(0)
-  recordsUpdated        Int                @default(0)
-  recordsDeleted        Int                @default(0)
-  recordsFailed         Int                @default(0)
-  errorMessage          String?
-  metadata              Json?
-  organization          Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  integrationConfig     IntegrationConfig  @relation(fields: [integrationConfigId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, provider, startedAt])
-  @@index([integrationConfigId, startedAt])
-  @@index([status, startedAt])
-}
-
-model ExternalIdentityMapping {
-  id                   String       @id @default(cuid())
-  organizationId       String
-  userId               String?
-  externalSource       String
-  externalIdentity     String
-  externalDisplayName  String?
-  mappingMethod        String?
-  metadata             Json?
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
-  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user                 User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  @@unique([organizationId, externalSource, externalIdentity])
-  @@index([organizationId, userId])
-}
-
-model AuditEvent {
-  id             String       @id @default(cuid())
-  organizationId String
-  actorUserId    String
-  actorRole      String
-  action         String
-  entityType     String
-  entityId       String?
-  departmentId   String?
-  metadata       Json?
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, createdAt])
-  @@index([organizationId, action])
-  @@index([actorUserId, createdAt])
-  @@index([entityType, entityId])
 }
 
 model Account {
@@ -450,81 +238,17 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-model CollectorRun {
-  id           String    @id @default(cuid())
-  source       String
-  status       String
-  startedAt    DateTime  @default(now())
-  completedAt  DateTime?
-  itemsFound   Int       @default(0)
-  itemsNew     Int       @default(0)
-  itemsUpdated Int       @default(0)
-  itemsSkipped Int       @default(0)
-  errorMessage String?
-  durationMs   Int?
-
-  @@index([source])
-  @@index([status])
-  @@index([startedAt])
-}
-
-model ThreatNote {
-  id         String   @id @default(cuid())
-  threatId   String
-  threat     Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
-  authorId   String
-  author     User     @relation("ThreatNoteAuthor", fields: [authorId], references: [id])
-  content    String
-  isInternal Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  @@index([threatId])
-  @@index([authorId])
-}
-
-model ThreatStatusHistory {
-  id          String   @id @default(cuid())
-  threatId    String
-  threat      Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
-  changedById String
-  changedBy   User     @relation("ThreatStatusChangedBy", fields: [changedById], references: [id])
-  fromStatus  String
-  toStatus    String
-  note        String?
-  createdAt   DateTime @default(now())
-
-  @@index([threatId])
-  @@index([changedById])
-}
-
-model SavedFilter {
-  id             String       @id @default(cuid())
-  userId         String
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String
-  filters        Json
-  isShared       Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  @@index([userId])
-  @@index([organizationId])
-}
-
 model JiraTicket {
   id               String       @id @default(cuid())
   threatId         String
   threat           Threat       @relation(fields: [threatId], references: [id], onDelete: Cascade)
   organizationId   String
   organization     Organization @relation(fields: [organizationId], references: [id])
-  jiraKey          String?
+  jiraKey          String? // e.g. "SEC-123" - null until actually created in Jira
   title            String
   description      String
-  priority         String
-  status           String       @default("DRAFT")
+  priority         String // Critical, High, Medium, Low
+  status           String       @default("DRAFT") // DRAFT, CREATED, IN_PROGRESS, RESOLVED, CLOSED
   affectedPackage  String?
   affectedProduct  String?
   productOwner     String?
@@ -532,7 +256,7 @@ model JiraTicket {
   cveId            String?
   remediationSteps String?
   notes            String?
-  createdBy        String
+  createdBy        String // user email
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -544,7 +268,7 @@ model CybellumAsset {
   id             String            @id @default(cuid())
   organizationId String
   organization   Organization      @relation(fields: [organizationId], references: [id])
-  cybellumId     String?
+  cybellumId     String? // ID in Cybellum system (null = manually entered)
   productName    String
   productVersion String?
   packageName    String?
@@ -567,7 +291,7 @@ model ThreatAssetLink {
   threat    Threat        @relation(fields: [threatId], references: [id], onDelete: Cascade)
   assetId   String
   asset     CybellumAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  linkedBy  String
+  linkedBy  String // user email
   notes     String?
   createdAt DateTime      @default(now())
 
@@ -577,48 +301,68 @@ model ThreatAssetLink {
 }
 
 model NotificationPreference {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailEnabled      Boolean  @default(true)
-  slackEnabled      Boolean  @default(false)
-  teamsEnabled      Boolean  @default(false)
-  email             String?
-  slackWebhook      String?
-  slackChannel      String?
-  teamsWebhook      String?
-  minSeverity       String   @default("HIGH")
-  kevOnly           Boolean  @default(false)
-  assetMatchOnly    Boolean  @default(false)
-  digestMode        String   @default("IMMEDIATE")
-  digestTime        String   @default("08:00")
-  quietHoursEnabled Boolean  @default(false)
-  quietHoursStart   String?
-  quietHoursEnd     String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Channels enabled
+  emailEnabled Boolean @default(true)
+  slackEnabled Boolean @default(false)
+  teamsEnabled Boolean @default(false)
+
+  // Email settings
+  email String?
+
+  // Slack settings
+  slackWebhook String?
+  slackChannel String?
+
+  // Teams settings
+  teamsWebhook String?
+
+  // Trigger thresholds
+  minSeverity    String  @default("HIGH") // CRITICAL, HIGH, MEDIUM, LOW
+  kevOnly        Boolean @default(false)
+  assetMatchOnly Boolean @default(false)
+
+  // Digest mode
+  digestMode String @default("IMMEDIATE") // IMMEDIATE, DAILY, WEEKLY
+  digestTime String @default("08:00") // HH:MM format for daily/weekly digest
+
+  // Quiet hours
+  quietHoursEnabled Boolean @default(false)
+  quietHoursStart   String? // HH:MM format
+  quietHoursEnd     String? // HH:MM format
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
 }
 
 model NotificationLog {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  type           String
-  channel        String
-  status         String
-  title          String
-  message        String
-  metadata       String?
-  threatId       String?
-  threat         Threat?       @relation(fields: [threatId], references: [id], onDelete: SetNull)
-  sentAt         DateTime?
-  failureReason  String?
-  createdAt      DateTime      @default(now())
-  digestQueues   DigestQueue[]
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  type    String // THREAT_ADDED, THREAT_STATUS_CHANGED, JIRA_TICKET_CREATED, ASSET_RISK_HIGH, etc.
+  channel String // EMAIL, SLACK, TEAMS, IN_APP
+  status  String // PENDING, SENT, FAILED
+
+  title    String
+  message  String
+  metadata String? // JSON string with additional context
+
+  threatId String?
+  threat   Threat? @relation(fields: [threatId], references: [id], onDelete: SetNull)
+
+  sentAt        DateTime?
+  failureReason String?
+
+  createdAt    DateTime      @default(now())
+  digestQueues DigestQueue[]
 
   @@index([userId])
   @@index([organizationId])
@@ -639,13 +383,17 @@ model DigestQueue {
   @@index([userId, scheduledFor, processed])
 }
 
+// ---------------------------------------------------------------------------
+// Security & Admin Hardening (Track C)
+// ---------------------------------------------------------------------------
+
 model MfaSecret {
   id          String   @id @default(cuid())
   userId      String   @unique
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  secret      String
+  secret      String // TOTP secret (base32). Encrypt at rest in a future iteration.
   verified    Boolean  @default(false)
-  backupCodes String[]
+  backupCodes String[] // SHA-256 hashes of one-time backup codes
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -654,7 +402,7 @@ model PasswordResetToken {
   id        String    @id @default(cuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
+  tokenHash String    @unique // SHA-256 of the raw token
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
@@ -669,9 +417,9 @@ model ApiKey {
   createdById    String
   createdBy      User         @relation("ApiKeyCreatedBy", fields: [createdById], references: [id])
   name           String
-  keyPrefix      String
-  keyHash        String       @unique
-  scopes         String[]
+  keyPrefix      String // e.g. "tp_live_ab12cd34" (safe to display)
+  keyHash        String       @unique // SHA-256 of the full key
+  scopes         String[] // e.g. ["threats.read", "threats.manage"]
   lastUsedAt     DateTime?
   expiresAt      DateTime?
   revokedAt      DateTime?
@@ -700,11 +448,11 @@ model AuditLog {
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   userId         String?
   user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  actorEmail     String?
-  action         String
-  targetType     String?
+  actorEmail     String? // denormalized so the trail survives user deletion
+  action         String // e.g. "mfa.enabled", "apikey.created", "session.revoked"
+  targetType     String? // e.g. "ApiKey", "User", "Threat"
   targetId       String?
-  metadata       String?
+  metadata       String? // JSON string with additional context
   ipAddress      String?
   createdAt      DateTime      @default(now())
 
@@ -718,9 +466,9 @@ model ComplianceTag {
   id          String   @id @default(cuid())
   threatId    String
   threat      Threat   @relation(fields: [threatId], references: [id], onDelete: Cascade)
-  framework   String
-  controlId   String
-  controlName String
+  framework   String // e.g. "NIST_CSF", "ISO_27001", "SOC2", "PCI_DSS"
+  controlId   String // e.g. "ID.RA-1", "A.12.6.1", "CC7.1", "6.3.3"
+  controlName String // Human-readable control name
   createdAt   DateTime @default(now())
 
   @@index([threatId])

@@ -1,7 +1,7 @@
 import { db } from './db';
 import type { Threat, NotificationPreference } from '@prisma/client';
 
-export type NotificationType =
+export type NotificationType = 
   | 'THREAT_ADDED'
   | 'THREAT_STATUS_CHANGED'
   | 'JIRA_TICKET_CREATED'
@@ -52,7 +52,7 @@ export async function checkShouldNotify(
 
   // Check KEV-only filter
   if (prefs.kevOnly) {
-    const isKev = threat.source?.toLowerCase().includes('kev') ||
+    const isKev = threat.source?.toLowerCase().includes('kev') || 
                   threat.source?.toLowerCase().includes('known exploited');
     if (!isKev) return false;
   }
@@ -73,7 +73,7 @@ export function isQuietHours(prefs: NotificationPreference): boolean {
 
   const now = new Date();
   const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
+  
   // Simple time range check (doesn't handle overnight ranges yet)
   return currentTime >= prefs.quietHoursStart && currentTime <= prefs.quietHoursEnd;
 }
@@ -257,7 +257,7 @@ export async function sendDigest(userId: string) {
   for (const [channel, digests] of Object.entries(byChannel)) {
     const title = `ThreatPulse Digest: ${digests.length} notifications`;
     const message = digests.map((d: any) => `• ${d.notificationLog.title}`).join('\n');
-
+    
     // Send via appropriate channel (using first notification's user prefs)
     await sendNotification(digests[0].notificationLog.id);
   }
@@ -277,7 +277,7 @@ export async function sendDigest(userId: string) {
 async function sendEmail(to: string, subject: string, body: string): Promise<{ success: boolean; error?: string }> {
   // Check if SMTP is configured
   const smtpConfigured = process.env.SMTP_HOST && process.env.SMTP_USER;
-
+  
   if (!smtpConfigured) {
     console.log(`[EMAIL STUB] Would send to ${to}: ${subject}`);
     return { success: false, error: 'SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in environment.' };

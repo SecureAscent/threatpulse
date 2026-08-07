@@ -19,7 +19,7 @@ This guide walks through deploying the full ThreatPulse Intel production stack o
 ## 2. Clone and configure
 
 ```bash
-git clone https://github.com/EyesMindOpen/threatpulse.git
+git clone https://github.com/SecureAscent/threatpulse.git
 cd threatpulse
 make setup            # creates .env.prod
 ```

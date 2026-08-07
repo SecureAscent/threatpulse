@@ -46,12 +46,12 @@ function fmtDate(d: string | Date | null | undefined): string {
  */
 function getSourceUrl(threat: any): string | undefined {
   if (!threat) return undefined;
-
+  
   // For CVE-type threats (KEV, NVD), link to NVD using the threatId (CVE ID)
   if (threat.type === 'CVE' && threat.threatId?.startsWith('CVE-')) {
     return `https://nvd.nist.gov/vuln/detail/${threat.threatId}`;
   }
-
+  
   // For RSS/NEWS threats, the article URL is stored in the indicators field
   if (threat.type === 'NEWS' && threat.indicators) {
     // indicators might be a full URL or just a path; validate it's a proper URL
@@ -65,7 +65,7 @@ function getSourceUrl(threat: any): string | undefined {
       return undefined;
     }
   }
-
+  
   return undefined;
 }
 

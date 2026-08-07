@@ -9,44 +9,15 @@
 #   EMAIL=admin@example.com PASSWORD='S3cret!' ORG_NAME='Acme Security' \
 #     ./scripts/create-admin.sh
 #
-# Uses the production compose file and .env.prod by default; override with:
-#   COMPOSE_FILE=docker-compose.dev.yml ENV_FILE=.env \
-#     ./scripts/create-admin.sh
+# Uses the production compose file by default; override with:
+#   COMPOSE_FILE=docker-compose.dev.yml ./scripts/create-admin.sh
 ###############################################################################
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # repo root
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-
-if [ -n "${ENV_FILE:-}" ]; then
-  COMPOSE_ENV_FILE="$ENV_FILE"
-elif [ "$COMPOSE_FILE" = "docker-compose.prod.yml" ]; then
-  COMPOSE_ENV_FILE=".env.prod"
-else
-  COMPOSE_ENV_FILE=".env"
-fi
-
-if [ ! -f "$COMPOSE_FILE" ]; then
-  echo "ERROR: Compose file '$COMPOSE_FILE' was not found." >&2
-  exit 1
-fi
-
-if [ ! -f "$COMPOSE_ENV_FILE" ]; then
-  echo "ERROR: Environment file '$COMPOSE_ENV_FILE' was not found." >&2
-  echo "Create it first or set ENV_FILE=/path/to/your/env-file." >&2
-  exit 1
-fi
-
-# Use an array so paths containing spaces are handled safely.
-COMPOSE=(docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE")
-
-# Validate Compose interpolation before prompting for credentials.
-if ! "${COMPOSE[@]}" config --quiet; then
-  echo "ERROR: Docker Compose configuration validation failed." >&2
-  echo "Check required values in '$COMPOSE_ENV_FILE', including POSTGRES_PASSWORD." >&2
-  exit 1
-fi
+COMPOSE="docker compose -f $COMPOSE_FILE"
 
 # ── Gather inputs ────────────────────────────────────────────────────────────
 EMAIL="${EMAIL:-}"
@@ -73,12 +44,11 @@ fi
 ORG_SLUG="$(echo "$ORG_NAME" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//')"
 ORG_SLUG="${ORG_SLUG:-threatpulse-demo}"
 
-echo "==> Using compose file '$COMPOSE_FILE' with environment '$COMPOSE_ENV_FILE'"
 echo "==> Creating SUPERADMIN '$EMAIL' in org '$ORG_NAME' (slug: $ORG_SLUG)"
 
 # ── Run the Prisma script inside the app container ───────────────────────────
 # The app image ships @prisma/client + bcryptjs under /app/prisma-tools.
-"${COMPOSE[@]}" exec -T \
+$COMPOSE exec -T \
   -e ADMIN_EMAIL="$EMAIL" \
   -e ADMIN_PASSWORD="$PASSWORD" \
   -e ADMIN_ORG="$ORG_NAME" \
