@@ -12,9 +12,9 @@ import type { TenantContext } from '@/lib/tenant-context';
 export interface AuditEventInput {
   action: string;
   /** Canonical tenant context. */
-  ctx?: TenantContext | null;
+  ctx?: Partial<TenantContext> | null;
   /** Alias for ctx (accepted for backwards compatibility). */
-  context?: TenantContext | null;
+  context?: Partial<TenantContext> | null;
   organizationId?: string | null;
   userId?: string | null;
   actorEmail?: string | null;
