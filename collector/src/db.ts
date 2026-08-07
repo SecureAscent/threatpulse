@@ -29,10 +29,15 @@ pool.on('error', (err) => {
   log.error('Unexpected idle client error', err.message);
 });
 
+/**
+ * Prisma generates `cuid()` ids in the application layer, so the DB column has
+ * no default. We generate a compatible collision-resistant id here.
+ */
 export function generateId(): string {
   return 'clc' + Date.now().toString(36) + randomBytes(8).toString('hex');
 }
 
+/** Wait until the database is reachable (Postgres may still be starting). */
 export async function waitForDatabase(retries = 30, delayMs = 2000): Promise<void> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -49,16 +54,14 @@ export async function waitForDatabase(retries = 30, delayMs = 2000): Promise<voi
 }
 
 /**
- * Resolve the explicit organization that collected threats are attached to.
- * This intentionally fails closed: it never chooses another organization when
- * COLLECTOR_ORG_SLUG is missing or invalid.
+ * Resolve the organization that collected threats are attached to.
+ * Threats are org-scoped, so the collector needs a target org.
+ *   - Prefers COLLECTOR_ORG_SLUG (default "threatpulse-demo")
+ *   - Falls back to the oldest organization in the table
+ * Returns null if no organization exists yet (app seeds one on first boot).
  */
 export async function resolveOrganizationId(): Promise<string | null> {
-  const slug = process.env.COLLECTOR_ORG_SLUG?.trim();
-  if (!slug) {
-    log.error('COLLECTOR_ORG_SLUG is required; refusing to select a tenant implicitly.');
-    return null;
-  }
+  const slug = process.env.COLLECTOR_ORG_SLUG || 'threatpulse-demo';
 
   const bySlug = await pool.query<{ id: string }>(
     'SELECT id FROM "Organization" WHERE slug = $1 LIMIT 1',
@@ -66,15 +69,23 @@ export async function resolveOrganizationId(): Promise<string | null> {
   );
   if (bySlug.rows.length > 0) return bySlug.rows[0].id;
 
-  log.error(`Organization slug "${slug}" was not found; collection will be skipped.`);
+  const first = await pool.query<{ id: string }>(
+    'SELECT id FROM "Organization" ORDER BY "createdAt" ASC LIMIT 1',
+  );
+  if (first.rows.length > 0) {
+    log.warn(`Org slug "${slug}" not found; using oldest organization instead.`);
+    return first.rows[0].id;
+  }
+
   return null;
 }
 
+/** Normalized threat record ready to upsert. */
 export interface ThreatRecord {
   threatId: string;
   title: string;
-  type: string;
-  severity: string;
+  type: string; // CVE | IOC | TTP | NEWS
+  severity: string; // CRITICAL | HIGH | MEDIUM | LOW
   description?: string | null;
   affectedAssets?: string | null;
   source?: string | null;
@@ -89,69 +100,15 @@ export interface UpsertResult {
   updated: number;
 }
 
-export async function startCollectorRun(source: string): Promise<string> {
-  const id = generateId();
-  await pool.query(
-    `INSERT INTO "CollectorRun" (
-       id, source, status, "startedAt", "itemsFound", "itemsNew",
-       "itemsUpdated", "itemsSkipped"
-     ) VALUES ($1, $2, 'running', NOW(), 0, 0, 0, 0)`,
-    [id, source],
-  );
-  return id;
-}
-
-export async function completeCollectorRun(
-  id: string,
-  result: {
-    itemsFound: number;
-    itemsNew: number;
-    itemsUpdated: number;
-    itemsSkipped: number;
-    durationMs: number;
-  },
-): Promise<void> {
-  await pool.query(
-    `UPDATE "CollectorRun"
-     SET status = 'success',
-         "completedAt" = NOW(),
-         "itemsFound" = $2,
-         "itemsNew" = $3,
-         "itemsUpdated" = $4,
-         "itemsSkipped" = $5,
-         "durationMs" = $6,
-         "errorMessage" = NULL
-     WHERE id = $1`,
-    [
-      id,
-      result.itemsFound,
-      result.itemsNew,
-      result.itemsUpdated,
-      result.itemsSkipped,
-      result.durationMs,
-    ],
-  );
-}
-
-export async function failCollectorRun(
-  id: string,
-  errorMessage: string,
-  durationMs: number,
-): Promise<void> {
-  await pool.query(
-    `UPDATE "CollectorRun"
-     SET status = 'error',
-         "completedAt" = NOW(),
-         "durationMs" = $2,
-         "errorMessage" = $3
-     WHERE id = $1`,
-    [id, durationMs, errorMessage.slice(0, 4000)],
-  );
-}
-
 /**
- * Upsert a batch of threats using the tenant-scoped unique key.
- * Analyst workflow status is preserved on updates.
+ * Upsert a batch of threats keyed by (organizationId, threatId).
+ *
+ * Implemented as update-first / insert-if-missing rather than SQL ON CONFLICT,
+ * so it does NOT require a DB unique constraint to exist (collection keeps
+ * working even if the unique index could not be created yet). Existing rows
+ * refresh their intelligence fields but PRESERVE the analyst's workflow
+ * `status` (NEW / INVESTIGATING / RESOLVED) so collection never clobbers
+ * triage work.
  */
 export async function upsertThreats(
   records: ThreatRecord[],
@@ -161,58 +118,189 @@ export async function upsertThreats(
   if (records.length === 0) return result;
 
   const client = await pool.connect();
+
+  // UPDATE SET clause used by the update-first path and the unique-violation
+  // fallback. Its own parameter numbering ($1..$13) — every referenced $N is
+  // supplied, so Postgres can infer each type. Analyst workflow `status` is
+  // deliberately NOT updated so collection never clobbers triage state.
+  const updateSql = `UPDATE "Threat" SET
+      title = $2, type = $3, severity = $4, description = $5,
+      "affectedAssets" = $6, source = $7, indicators = $8,
+      "mitreTactic" = $9, "mitreTechnique" = $10, "cvssScore" = $11,
+      "lastUpdated" = $12
+   WHERE "organizationId" = $13 AND "threatId" = $1`;
+
+  const insertSql = `INSERT INTO "Threat" (
+      id, "threatId", title, type, severity, status, description,
+      "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
+      "cvssScore", "dateAdded", "lastUpdated", "organizationId"
+   ) VALUES (
+      $1, $2, $3, $4, $5, 'NEW', $6,
+      $7, $8, $9, $10, $11,
+      $12, $13, $13, $14
+   )`;
+
   try {
     for (const r of records) {
       if (!r.threatId || !r.title) continue;
-      const id = generateId();
       const now = new Date();
-      const res = await client.query<{ inserted: boolean }>(
-        `INSERT INTO "Threat" (
-            id, "threatId", title, type, severity, status, description,
-            "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
-            "cvssScore", "dateAdded", "lastUpdated", "organizationId"
-         ) VALUES (
-            $1, $2, $3, $4, $5, 'NEW', $6,
-            $7, $8, $9, $10, $11,
-            $12, $13, $13, $14
-         )
-         ON CONFLICT ("organizationId", "threatId") DO UPDATE SET
-            title = EXCLUDED.title,
-            type = EXCLUDED.type,
-            severity = EXCLUDED.severity,
-            description = EXCLUDED.description,
-            "affectedAssets" = EXCLUDED."affectedAssets",
-            source = EXCLUDED.source,
-            indicators = EXCLUDED.indicators,
-            "mitreTactic" = EXCLUDED."mitreTactic",
-            "mitreTechnique" = EXCLUDED."mitreTechnique",
-            "cvssScore" = EXCLUDED."cvssScore",
-            "lastUpdated" = EXCLUDED."lastUpdated"
-         RETURNING (xmax = 0) AS inserted`,
-        [
-          id,
-          r.threatId.slice(0, 191),
-          r.title.slice(0, 500),
-          r.type,
-          r.severity,
-          r.description ?? null,
-          r.affectedAssets ?? null,
-          r.source ?? null,
-          r.indicators ?? null,
-          r.mitreTactic ?? null,
-          r.mitreTechnique ?? null,
-          r.cvssScore ?? null,
-          now,
-          organizationId,
-        ],
-      );
-      if (res.rows[0]?.inserted) result.inserted++;
-      else result.updated++;
+      const threatId = r.threatId.slice(0, 191);
+      const title = r.title.slice(0, 500);
+
+      // Params for UPDATE ($1..$13): keyed by (threatId, organizationId).
+      const updateParams = [
+        threatId, // $1
+        title, // $2
+        r.type, // $3
+        r.severity, // $4
+        r.description ?? null, // $5
+        r.affectedAssets ?? null, // $6
+        r.source ?? null, // $7
+        r.indicators ?? null, // $8
+        r.mitreTactic ?? null, // $9
+        r.mitreTechnique ?? null, // $10
+        r.cvssScore ?? null, // $11
+        now, // $12
+        organizationId, // $13
+      ];
+
+      // Upsert WITHOUT relying on a DB unique constraint: update first, and
+      // only insert when no existing row matched. This keeps collection working
+      // even if the (organizationId, threatId) unique index has not been
+      // created yet (e.g. blocked by pre-existing duplicate rows), and it never
+      // creates new duplicates for a key that already exists.
+      const upd = await client.query(updateSql, updateParams);
+      if ((upd.rowCount ?? 0) > 0) {
+        result.updated++;
+        continue;
+      }
+
+      // Params for INSERT ($1..$14): id first, then the same record fields.
+      const insertParams = [
+        generateId(), // $1
+        threatId, // $2
+        title, // $3
+        r.type, // $4
+        r.severity, // $5
+        r.description ?? null, // $6
+        r.affectedAssets ?? null, // $7
+        r.source ?? null, // $8
+        r.indicators ?? null, // $9
+        r.mitreTactic ?? null, // $10
+        r.mitreTechnique ?? null, // $11
+        r.cvssScore ?? null, // $12
+        now, // $13 (used for both "dateAdded" and "lastUpdated")
+        organizationId, // $14
+      ];
+
+      try {
+        await client.query(insertSql, insertParams);
+        result.inserted++;
+      } catch (err: any) {
+        // If the unique index DOES exist and a race/duplicate slipped in
+        // between the update and the insert, fall back to an update rather
+        // than failing the entire batch. (23505 = unique_violation.)
+        if (err?.code === '23505') {
+          await client.query(updateSql, updateParams);
+          result.updated++;
+        } else {
+          throw err;
+        }
+      }
     }
   } finally {
     client.release();
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// CollectorRun observability (Track A)
+// ---------------------------------------------------------------------------
+//
+// The collector records one CollectorRun row per source, per cycle. The row is
+// created when a source starts ("running") and finalized on success/error so
+// the app's Collector Health dashboard can show live status.
+
+export interface RunTotals {
+  itemsFound?: number;
+  itemsNew?: number;
+  itemsUpdated?: number;
+  itemsSkipped?: number;
+}
+
+/** Insert a "running" CollectorRun and return its id. */
+export async function startCollectorRun(source: string): Promise<string | null> {
+  try {
+    const id = generateId();
+    await pool.query(
+      `INSERT INTO "CollectorRun" (id, source, status, "startedAt", "itemsFound", "itemsNew", "itemsUpdated", "itemsSkipped")
+       VALUES ($1, $2, 'running', NOW(), 0, 0, 0, 0)`,
+      [id, source],
+    );
+    return id;
+  } catch (err) {
+    log.warn(`Could not record CollectorRun start for "${source}": ${errMsg(err)}`);
+    return null;
+  }
+}
+
+/** Finalize a CollectorRun as success with item counts and duration. */
+export async function completeCollectorRun(
+  id: string | null,
+  totals: RunTotals,
+  startedAtMs: number,
+): Promise<void> {
+  if (!id) return;
+  try {
+    await pool.query(
+      `UPDATE "CollectorRun" SET
+          status = 'success',
+          "completedAt" = NOW(),
+          "itemsFound" = $2,
+          "itemsNew" = $3,
+          "itemsUpdated" = $4,
+          "itemsSkipped" = $5,
+          "durationMs" = $6
+       WHERE id = $1`,
+      [
+        id,
+        totals.itemsFound ?? 0,
+        totals.itemsNew ?? 0,
+        totals.itemsUpdated ?? 0,
+        totals.itemsSkipped ?? 0,
+        Date.now() - startedAtMs,
+      ],
+    );
+  } catch (err) {
+    log.warn(`Could not record CollectorRun completion (${id}): ${errMsg(err)}`);
+  }
+}
+
+/** Finalize a CollectorRun as error with the message and duration. */
+export async function failCollectorRun(
+  id: string | null,
+  errorMessage: string,
+  startedAtMs: number,
+): Promise<void> {
+  if (!id) return;
+  try {
+    await pool.query(
+      `UPDATE "CollectorRun" SET
+          status = 'error',
+          "completedAt" = NOW(),
+          "errorMessage" = $2,
+          "durationMs" = $3
+       WHERE id = $1`,
+      [id, errorMessage.slice(0, 1000), Date.now() - startedAtMs],
+    );
+  } catch (err) {
+    log.warn(`Could not record CollectorRun failure (${id}): ${errMsg(err)}`);
+  }
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export async function closePool(): Promise<void> {

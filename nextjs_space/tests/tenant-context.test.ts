@@ -9,11 +9,14 @@ import {
 
 function context(overrides: Partial<TenantContext> = {}): TenantContext {
   return {
+    source: 'session',
     userId: 'user-1',
-    role: 'ANALYST',
+    email: null,
     organizationId: 'org-1',
+    role: 'ANALYST',
     departmentId: null,
     parentOrganizationId: null,
+    permissions: [],
     ...overrides,
   };
 }

@@ -303,8 +303,8 @@ export default function IntegrationsContent() {
   const handleServiceTest = async (svcId: string) => {
     setTesting(svcId);
     try {
-      const endpoint = svcId === 'jira'
-        ? '/api/integrations/jira/test'
+      const endpoint = svcId === 'jira' 
+        ? '/api/integrations/jira/test' 
         : '/api/admin/integrations/test';
       const res = await fetch(endpoint, {
         method: 'POST',

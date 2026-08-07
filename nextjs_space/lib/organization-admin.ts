@@ -19,7 +19,7 @@ export function organizationScope(
     return { parentOrganizationId: context.parentOrganizationId };
   }
 
-  return { id: context.organizationId };
+  return { id: context.organizationId ?? '' };
 }
 
 export function canCreateOrganization(context: TenantContext): boolean {

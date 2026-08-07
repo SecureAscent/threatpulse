@@ -13,23 +13,28 @@
  * Schedule: every COLLECTOR_INTERVAL_MINUTES (default 15) via node-cron.
  * Set RUN_ONCE=true to run a single collection cycle and exit (useful for
  * cron-in-container, manual `make` targets, or debugging).
+ *
+ * Observability: each source run is recorded as a CollectorRun row so the
+ * app's Collector Health dashboard can show live status. A tiny HTTP control
+ * server (COLLECTOR_CONTROL_PORT, default 9464) exposes POST /run to let the
+ * app trigger a manual collection ("Run Now").
  */
 import cron from 'node-cron';
 import {
   waitForDatabase,
   resolveOrganizationId,
   upsertThreats,
+  closePool,
   startCollectorRun,
   completeCollectorRun,
   failCollectorRun,
-  closePool,
   ThreatRecord,
 } from './db';
 import { createLogger } from './logger';
-import { startControlServer } from './control';
 import { collectKev } from './sources/kev';
 import { collectNvd } from './sources/nvd';
 import { collectRss } from './sources/rss';
+import { startControlServer } from './control';
 
 const log = createLogger('collector');
 
@@ -41,7 +46,14 @@ const RUN_ONCE = String(process.env.RUN_ONCE || '').toLowerCase() === 'true';
 
 type SourceFn = () => Promise<ThreatRecord[]>;
 
-const SOURCES: { key: string; name: string; fn: SourceFn; enabled: boolean }[] = [
+interface Source {
+  key: string; // stable key stored on CollectorRun.source
+  name: string; // human-readable label
+  fn: SourceFn;
+  enabled: boolean;
+}
+
+const SOURCES: Source[] = [
   { key: 'cisa_kev', name: 'CISA KEV', fn: collectKev, enabled: envFlag('COLLECT_KEV', true) },
   { key: 'nvd', name: 'NVD', fn: collectNvd, enabled: envFlag('COLLECT_NVD', true) },
   { key: 'rss', name: 'RSS', fn: collectRss, enabled: envFlag('COLLECT_RSS', true) },
@@ -54,33 +66,25 @@ function envFlag(name: string, def: boolean): boolean {
 }
 
 let running = false;
-let controlServer: ReturnType<typeof startControlServer> | null = null;
 
-interface CycleResult {
+/**
+ * Run a collection cycle. When `onlySourceKey` is provided, only that source
+ * runs (used by the manual "Run Now" trigger); otherwise all enabled sources
+ * run. Returns a short summary for the caller.
+ */
+async function runCycle(onlySourceKey?: string): Promise<{
   ok: boolean;
   message: string;
   totalInserted: number;
   totalUpdated: number;
-}
-
-async function runCycle(sourceKey?: string): Promise<CycleResult> {
+}> {
   if (running) {
     log.warn('Previous collection cycle still running — skipping this tick.');
-    return {
-      ok: false,
-      message: 'A collection cycle is already running.',
-      totalInserted: 0,
-      totalUpdated: 0,
-    };
+    return { ok: false, message: 'A collection cycle is already running.', totalInserted: 0, totalUpdated: 0 };
   }
   running = true;
   const startedAt = Date.now();
-  const selectedSources = SOURCES.filter(
-    (source) => source.enabled && (!sourceKey || source.key === sourceKey),
-  );
-  log.info(
-    `──────────── Collection cycle START${sourceKey ? ` (${sourceKey})` : ''} ────────────`,
-  );
+  log.info('──────────── Collection cycle START ────────────');
 
   try {
     const organizationId = await resolveOrganizationId();
@@ -88,71 +92,49 @@ async function runCycle(sourceKey?: string): Promise<CycleResult> {
       log.warn(
         'No organization found yet (app may not have seeded). Skipping cycle; will retry next tick.',
       );
-      return {
-        ok: false,
-        message: 'Collector organization is unavailable.',
-        totalInserted: 0,
-        totalUpdated: 0,
-      };
+      return { ok: false, message: 'No organization found yet.', totalInserted: 0, totalUpdated: 0 };
     }
     log.info(`Target organizationId=${organizationId}`);
 
     let totalInserted = 0;
     let totalUpdated = 0;
-    let failedSources = 0;
 
-    for (const source of selectedSources) {
-      const sourceStartedAt = Date.now();
-      let collectorRunId: string | null = null;
-      try {
-        collectorRunId = await startCollectorRun(source.key);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Could not record start of source "${source.name}": ${msg}`);
+    const targets = onlySourceKey
+      ? SOURCES.filter((s) => s.key === onlySourceKey)
+      : SOURCES;
+
+    if (onlySourceKey && targets.length === 0) {
+      return { ok: false, message: `Unknown source "${onlySourceKey}".`, totalInserted: 0, totalUpdated: 0 };
+    }
+
+    for (const source of targets) {
+      if (!source.enabled && !onlySourceKey) {
+        log.info(`Source "${source.name}" disabled via env — skipping.`);
+        continue;
       }
-
+      const runStartedAt = Date.now();
+      const runId = await startCollectorRun(source.key);
       try {
         const records = await source.fn();
         const { inserted, updated } = await upsertThreats(records, organizationId);
         totalInserted += inserted;
         totalUpdated += updated;
-        if (collectorRunId) {
-          try {
-            await completeCollectorRun(collectorRunId, {
-              itemsFound: records.length,
-              itemsNew: inserted,
-              itemsUpdated: updated,
-              itemsSkipped: Math.max(0, records.length - inserted - updated),
-              durationMs: Date.now() - sourceStartedAt,
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            log.error(`Could not record completion of source "${source.name}": ${msg}`);
-          }
-        }
+        await completeCollectorRun(
+          runId,
+          {
+            itemsFound: records.length,
+            itemsNew: inserted,
+            itemsUpdated: updated,
+            itemsSkipped: Math.max(0, records.length - inserted - updated),
+          },
+          runStartedAt,
+        );
         log.info(
           `Source "${source.name}" done: ${inserted} new, ${updated} updated (${records.length} fetched).`,
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        failedSources++;
-        if (collectorRunId) {
-          try {
-            await failCollectorRun(
-              collectorRunId,
-              msg,
-              Date.now() - sourceStartedAt,
-            );
-          } catch (trackingError) {
-            const trackingMessage =
-              trackingError instanceof Error
-                ? trackingError.message
-                : String(trackingError);
-            log.error(
-              `Could not record failure of source "${source.name}": ${trackingMessage}`,
-            );
-          }
-        }
+        await failCollectorRun(runId, msg, runStartedAt);
         log.error(`Source "${source.name}" failed: ${msg}`);
       }
     }
@@ -162,23 +144,15 @@ async function runCycle(sourceKey?: string): Promise<CycleResult> {
       `──────────── Collection cycle DONE in ${secs}s — ${totalInserted} new, ${totalUpdated} updated ────────────`,
     );
     return {
-      ok: failedSources === 0,
-      message:
-        failedSources === 0
-          ? `Collection completed: ${totalInserted} new, ${totalUpdated} updated.`
-          : `Collection completed with ${failedSources} source failure(s).`,
+      ok: true,
+      message: `${totalInserted} new, ${totalUpdated} updated.`,
       totalInserted,
       totalUpdated,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Collection cycle aborted: ${msg}`);
-    return {
-      ok: false,
-      message: `Collection cycle aborted: ${msg}`,
-      totalInserted: 0,
-      totalUpdated: 0,
-    };
+    return { ok: false, message: msg, totalInserted: 0, totalUpdated: 0 };
   } finally {
     running = false;
   }
@@ -200,12 +174,11 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  controlServer = startControlServer({
+  // HTTP control server for manual "Run Now" triggers from the app.
+  startControlServer({
     isRunning: () => running,
-    trigger: runCycle,
-    knownSourceKeys: SOURCES.filter((source) => source.enabled).map(
-      (source) => source.key,
-    ),
+    trigger: (sourceKey?: string) => runCycle(sourceKey),
+    knownSourceKeys: SOURCES.map((s) => s.key),
   });
 
   // Run one cycle immediately on boot, then on the schedule.
@@ -226,7 +199,6 @@ async function main(): Promise<void> {
 async function shutdown(signal: string): Promise<void> {
   log.info(`Received ${signal} — shutting down.`);
   try {
-    controlServer?.close();
     await closePool();
   } catch {
     /* ignore */

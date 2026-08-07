@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
     if (clash) return NextResponse.json({ error: 'Slug already in use' }, { status: 409 });
 
     let parentOrganizationId: string | null = null;
-    if (body?.parentId) {
+    if (body?.parentOrganizationId) {
       const parentOrg = await prisma.parentOrganization.findUnique({
-        where: { id: String(body.parentId) },
+        where: { id: String(body.parentOrganizationId) },
         select: { id: true },
       });
       if (!parentOrg) return NextResponse.json({ error: 'Parent organization not found' }, { status: 404 });

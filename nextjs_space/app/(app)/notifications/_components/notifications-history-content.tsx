@@ -50,7 +50,7 @@ export default function NotificationsHistoryContent() {
       const params = new URLSearchParams();
       if (typeFilter !== 'all') params.set('type', typeFilter);
       if (statusFilter !== 'all') params.set('status', statusFilter);
-
+      
       const res = await fetch(`/api/notifications/history?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();

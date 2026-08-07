@@ -31,6 +31,10 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    if (!context.organizationId) {
+      return NextResponse.json({ error: 'No organization context' }, { status: 403 });
+    }
+
     const integration = await prisma.integrationConfig.findFirst({
       where: {
         id: params.id,

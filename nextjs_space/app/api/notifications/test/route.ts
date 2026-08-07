@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
 // These are used both here and in the main service
 async function sendEmail(to: string, subject: string, body: string) {
   const smtpConfigured = process.env.SMTP_HOST && process.env.SMTP_USER;
-
+  
   if (!smtpConfigured) {
     return { success: false, error: 'SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM in environment.' };
   }

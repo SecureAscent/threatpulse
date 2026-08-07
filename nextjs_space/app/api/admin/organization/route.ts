@@ -64,7 +64,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
 
     const body = await req.json();
-    const { id, name, slug, parentId } = body ?? {};
+    const { id, name, slug, parentOrganizationId } = body ?? {};
     const isSuper = user?.role === 'SUPERADMIN';
     const orgId = resolveTargetOrgId(user, id);
     if (!orgId) return NextResponse.json({ error: 'No org' }, { status: 400 });
@@ -77,7 +77,7 @@ export async function PATCH(req: NextRequest) {
       parentOrganizationId?: string | null;
     } = { name: String(name).trim() };
 
-    // Only SUPERADMIN may change slug and parent organization.
+    // Only SUPERADMIN may change slug and parentOrganizationId.
     if (isSuper) {
       // Slug: identity key used by the collector. Change with care.
       if (slug != null && String(slug).trim()) {
@@ -91,17 +91,17 @@ export async function PATCH(req: NextRequest) {
         data.slug = nextSlug;
       }
 
-      // Parent org: must exist and must not create a cycle (org cannot be its own ancestor).
-      if (parentId !== undefined) {
-        if (parentId === null || parentId === '') {
+      // Parent organization: must exist in the ParentOrganization table.
+      if (parentOrganizationId !== undefined) {
+        if (parentOrganizationId === null || parentOrganizationId === '') {
           data.parentOrganizationId = null;
         } else {
           const parentOrg = await prisma.parentOrganization.findUnique({
-            where: { id: String(parentId) },
+            where: { id: String(parentOrganizationId) },
             select: { id: true },
           });
           if (!parentOrg) return NextResponse.json({ error: 'Parent organization not found' }, { status: 404 });
-          data.parentOrganizationId = String(parentId);
+          data.parentOrganizationId = String(parentOrganizationId);
         }
       }
     }
