@@ -125,6 +125,7 @@ export async function collectNvd(): Promise<ThreatRecord[]> {
         mitreTactic: null,
         mitreTechnique: null,
         cvssScore: score,
+        sourceUrl: `https://nvd.nist.gov/vuln/detail/${cve.id}`,
       });
     }
 
