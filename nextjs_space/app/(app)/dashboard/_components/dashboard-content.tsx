@@ -146,10 +146,10 @@ export default function DashboardContent() {
   const riskInsights = stats?.riskInsights;
 
   const metricCards = [
-    { label: 'Total Threats', value: total, icon: Shield, color: 'text-primary', bgColor: 'bg-primary/10' },
-    { label: 'Critical', value: bySeverity?.CRITICAL ?? 0, icon: AlertTriangle, color: 'text-red-500', bgColor: 'bg-red-500/10' },
-    { label: 'High Severity', value: bySeverity?.HIGH ?? 0, icon: Zap, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
-    { label: 'Today', value: todayCount, icon: TrendingUp, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
+    { label: 'Total Threats', value: total, href: '/threats', icon: Shield, color: 'text-primary', bgColor: 'bg-primary/10' },
+    { label: 'Critical', value: bySeverity?.CRITICAL ?? 0, pct: total ? Math.round((bySeverity?.CRITICAL ?? 0) / total * 100) : 0, href: '/threats?severity=CRITICAL', icon: AlertTriangle, color: 'text-red-500', bgColor: 'bg-red-500/10' },
+    { label: 'High Severity', value: bySeverity?.HIGH ?? 0, pct: total ? Math.round((bySeverity?.HIGH ?? 0) / total * 100) : 0, href: '/threats?severity=HIGH', icon: Zap, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+    { label: 'Today', value: todayCount, href: '/threat-feed', icon: TrendingUp, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
   ];
 
   return (
@@ -185,21 +185,26 @@ export default function DashboardContent() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {(metricCards ?? []).map((card: any, i: number) => (
           <SlideIn key={card?.label} from="bottom" delay={i * 0.05}>
-            <Card className="border-border/50">
-              <CardContent className="pt-5 pb-4 px-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">{card?.label}</p>
-                    <p className="text-3xl font-display font-bold mt-1">
-                      <AnimatedCounter value={card?.value ?? 0} />
-                    </p>
+            <Link href={card?.href || '/threats'}>
+              <Card className="border-border/50 hover:border-border transition-colors cursor-pointer group">
+                <CardContent className="pt-5 pb-4 px-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">{card?.label}</p>
+                      <p className="text-3xl font-display font-bold mt-1">
+                        <AnimatedCounter value={card?.value ?? 0} />
+                      </p>
+                      {card?.pct !== undefined && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{card.pct}% of total</p>
+                      )}
+                    </div>
+                    <div className={`w-10 h-10 rounded-lg ${card?.bgColor} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                      <card.icon className={`w-5 h-5 ${card?.color}`} />
+                    </div>
                   </div>
-                  <div className={`w-10 h-10 rounded-lg ${card?.bgColor} flex items-center justify-center`}>
-                    <card.icon className={`w-5 h-5 ${card?.color}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </Link>
           </SlideIn>
         ))}
       </div>
