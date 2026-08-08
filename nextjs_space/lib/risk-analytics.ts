@@ -10,6 +10,7 @@ export interface ThreatLike {
   title: string;
   severity: string;
   status: string;
+  type?: string | null;
   cvssScore?: number | null;
   epssScore?: number | null;
   epssPercentile?: number | null;
