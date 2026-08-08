@@ -6,7 +6,8 @@ import {
   Shield, LayoutDashboard, Bug, Package, Rss,
   CheckSquare, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown,
   FileText, HelpCircle, Plug, Briefcase, BookOpen, Ticket, Bell,
-  KeySquare, ListChecks, ShieldCheck, Activity, Radio, Crosshair
+  KeySquare, ListChecks, ShieldCheck, Activity, Radio, Crosshair,
+  BarChart3, Radar, Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -26,8 +27,14 @@ const intelItems = [
 ];
 
 const riskItems = [
+  { href: '/analytics', label: 'Advanced Analytics', icon: BarChart3 },
   { href: '/product-portfolio', label: 'Product Portfolio', icon: Package },
   { href: '/compliance', label: 'Compliance', icon: ShieldCheck },
+];
+
+const exposureItems = [
+  { href: '/exposure', label: 'Findings', icon: Radar },
+  { href: '/exposure/watchlists', label: 'Watchlists', icon: Target },
 ];
 
 const workflowItems = [
@@ -113,6 +120,7 @@ export default function AppSidebar() {
         <NavSection label="Overview" items={overviewItems} collapsed={collapsed} pathname={pathname} />
         <NavSection label="Threat Intelligence" items={intelItems} collapsed={collapsed} pathname={pathname} />
         <NavSection label="Risk & Portfolio" items={riskItems} collapsed={collapsed} pathname={pathname} />
+        <NavSection label="Exposure Monitoring" items={exposureItems} collapsed={collapsed} pathname={pathname} />
         <NavSection label="Workflow" items={workflowItems} collapsed={collapsed} pathname={pathname} />
         <NavSection label="Reports" items={reportItems} collapsed={collapsed} pathname={pathname} />
 

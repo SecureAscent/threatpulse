@@ -726,3 +726,102 @@ model ComplianceTag {
   @@index([threatId])
   @@index([framework])
 }
+
+// ── Exposure Monitoring Domain ──────────────────────────────────────────────
+
+model ExposureFinding {
+  id               String   @id @default(cuid())
+  organizationId   String
+  watchlistId      String?
+  kind             String   @default("credential_leak")
+  severity         String   @default("MEDIUM")
+  title            String
+  summary          String?
+  affectedIdentity String?
+  credentialSample String?
+  credentialHash   String?
+  sourceId         String?
+  sourceUrl        String?
+  retrievedAt      DateTime?
+  publishedAt      DateTime?
+  firstSeen        DateTime?
+  lastSeen         DateTime?
+  confidence       String   @default("medium")
+  reliability      String   @default("C")
+  attributionStatus String  @default("UNCONFIRMED")
+  fingerprint      String?
+  termsClass       String   @default("open")
+  status           String   @default("new")
+  assignedTo       String?
+  validationNotes  String?
+  retentionExpires DateTime?
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  evidence         ExposureEvidence[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([severity])
+}
+
+model ExposureEvidence {
+  id             String   @id @default(cuid())
+  findingId      String
+  finding        ExposureFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  organizationId String
+  sourceId       String?
+  capturedDate   DateTime?
+  publishedDate  DateTime?
+  contentExcerpt String?
+  fingerprint    String?
+  contentHash    String?
+  termsClass     String   @default("open")
+  revealed       Boolean  @default(false)
+  revealExpires  DateTime?
+  revealAudit    String?
+  retentionExpires DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([findingId])
+  @@index([organizationId])
+}
+
+model TenantWatchlist {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  kind           String   @default("domain")
+  terms          String?
+  enabled        Boolean  @default(true)
+  ownerName      String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model IntelligenceSource {
+  id                String   @id @default(cuid())
+  organizationId    String?
+  name              String
+  provider          String?
+  kind              String   @default("feed")
+  licenseClass      String   @default("open")
+  termsSummary      String?
+  reliability       String   @default("C")
+  defaultConfidence String   @default("medium")
+  authRequired      Boolean  @default(false)
+  enabled           Boolean  @default(true)
+  lastIngestedDate  DateTime?
+  ingestCount       Int      @default(0)
+  lastError         String?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([organizationId])
+}
