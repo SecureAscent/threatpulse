@@ -25,12 +25,13 @@ export interface RssFeed {
   url: string;
 }
 
-// Feeds requested for the collector (task spec) + a couple of reliable extras.
+// Feeds requested for the collector + reliable extras.
+// NOTE: CISA advisory RSS feeds are behind Akamai bot-protection and return
+// HTTP 403 to server-side clients, so they are not included here. CISA's
+// Known Exploited Vulnerabilities catalog is ingested via the dedicated KEV
+// collector. Bleeping Computer is behind Cloudflare and may fail from
+// datacenter IPs — the SaaS app provides an LLM web-search fallback for it.
 export const RSS_FEEDS: RssFeed[] = [
-  // NOTE: CISA's *.xml advisory feeds are behind Akamai bot-protection and
-  // return HTTP 403 to server-side clients, so they were removed. CISA's
-  // Known Exploited Vulnerabilities catalog is already ingested via the
-  // dedicated KEV collector. The Hacker News is a reliable general replacement.
   { name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews' },
   { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/' },
   { name: 'Bleeping Computer', url: 'https://www.bleepingcomputer.com/feed/' },
@@ -41,6 +42,12 @@ export const RSS_FEEDS: RssFeed[] = [
   { name: 'Recorded Future', url: 'https://www.recordedfuture.com/feed' },
   { name: 'Unit42', url: 'https://unit42.paloaltonetworks.com/feed/' },
   { name: 'Talos Intelligence', url: 'https://blog.talosintelligence.com/rss/' },
+  { name: 'The Record', url: 'https://therecord.media/feed/' },
+  { name: 'CyberScoop', url: 'https://www.cyberscoop.com/feed/' },
+  { name: 'Schneier on Security', url: 'https://www.schneier.com/feed/' },
+  { name: 'Naked Security', url: 'https://nakedsecurity.sophos.com/feed/' },
+  { name: 'Malwarebytes Labs', url: 'https://blog.malwarebytes.com/feed/' },
+  { name: 'Graham Cluley', url: 'https://grahamcluley.com/feed/' },
 ];
 
 // How many items to keep per feed per run.
