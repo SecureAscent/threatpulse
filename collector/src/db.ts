@@ -93,6 +93,7 @@ export interface ThreatRecord {
   mitreTactic?: string | null;
   mitreTechnique?: string | null;
   cvssScore?: number | null;
+  sourceUrl?: string | null;
 }
 
 export interface UpsertResult {
@@ -127,17 +128,18 @@ export async function upsertThreats(
       title = $2, type = $3, severity = $4, description = $5,
       "affectedAssets" = $6, source = $7, indicators = $8,
       "mitreTactic" = $9, "mitreTechnique" = $10, "cvssScore" = $11,
+      "sourceUrls" = CASE WHEN $14 IS NOT NULL AND ARRAY[$14] <@ "sourceUrls" THEN "sourceUrls" ELSE ARRAY(SELECT DISTINCT unnest("sourceUrls" || CASE WHEN $14 IS NOT NULL THEN ARRAY[$14] ELSE ARRAY[]::text[] END)) END,
       "lastUpdated" = $12
    WHERE "organizationId" = $13 AND "threatId" = $1`;
 
   const insertSql = `INSERT INTO "Threat" (
       id, "threatId", title, type, severity, status, description,
       "affectedAssets", source, indicators, "mitreTactic", "mitreTechnique",
-      "cvssScore", "dateAdded", "lastUpdated", "organizationId"
+      "cvssScore", "sourceUrls", "dateAdded", "lastUpdated", "organizationId"
    ) VALUES (
       $1, $2, $3, $4, $5, 'NEW', $6,
       $7, $8, $9, $10, $11,
-      $12, $13, $13, $14
+      $12, ARRAY[$15], $13, $13, $14
    )`;
 
   try {
@@ -191,6 +193,7 @@ export async function upsertThreats(
         r.cvssScore ?? null, // $12
         now, // $13 (used for both "dateAdded" and "lastUpdated")
         organizationId, // $14
+        r.sourceUrl ?? null, // $15 (sourceUrls array element)
       ];
 
       try {
