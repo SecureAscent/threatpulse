@@ -26,6 +26,17 @@ export async function getWithRetry<T = unknown>(
     } catch (err) {
       lastErr = err;
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+
+      // Log the response body for non-transient errors to aid debugging.
+      if (axios.isAxiosError(err) && err.response) {
+        const body = typeof err.response.data === 'string'
+          ? err.response.data.slice(0, 500)
+          : JSON.stringify(err.response.data)?.slice(0, 500);
+        console.error(
+          `[http] ${err.config?.method?.toUpperCase() || 'GET'} ${err.config?.url} → ${status}: ${body || '(empty body)'}`,
+        );
+      }
+
       // Back off harder on rate limiting.
       const wait = status === 429 ? 5000 * (attempt + 1) : 1500 * (attempt + 1);
       if (attempt < retries) {

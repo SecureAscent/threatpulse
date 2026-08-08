@@ -65,6 +65,15 @@ function extractCvss(cve: NvdCve): { score: number | null; severity: string } {
   return { score, severity: normalized };
 }
 
+/**
+ * NVD API v2 requires ISO-8601 dates WITHOUT the trailing 'Z' timezone
+ * indicator (format: yyyy-MM-ddTHH:mm:ss.sss).  Using toISOString() (which
+ * appends 'Z') can cause unexpected 404 responses from datacenter IPs.
+ */
+function nvdDate(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, m => m.slice(0, -1));
+}
+
 export async function collectNvd(): Promise<ThreatRecord[]> {
   const now = new Date();
   const start = new Date(now.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -81,8 +90,8 @@ export async function collectNvd(): Promise<ThreatRecord[]> {
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const params = {
-      lastModStartDate: start.toISOString(),
-      lastModEndDate: now.toISOString(),
+      lastModStartDate: nvdDate(start),
+      lastModEndDate: nvdDate(now),
       resultsPerPage: RESULTS_PER_PAGE,
       startIndex,
     };
