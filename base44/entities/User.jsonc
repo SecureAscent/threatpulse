@@ -1,0 +1,24 @@
+{
+  "properties": {
+    "role": {
+      "type": "string",
+      "description": "The role of the user in the app (SUPERADMIN / ADMIN / ANALYST)",
+      "enum": [
+        "superadmin",
+        "admin",
+        "analyst"
+      ],
+      "default": "analyst"
+    },
+    "organization_id": {
+      "type": "string",
+      "title": "Organization ID",
+      "description": "The organization this user belongs to for multi-tenant data isolation"
+    }
+  },
+  "required": [
+    "role"
+  ],
+  "name": "User",
+  "type": "object"
+}

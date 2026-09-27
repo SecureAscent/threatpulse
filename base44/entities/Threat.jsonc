@@ -1,0 +1,257 @@
+{
+  "name": "Threat",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "Title",
+      "description": "Threat headline"
+    },
+    "description": {
+      "type": "string",
+      "title": "Description"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "Critical",
+        "High",
+        "Medium",
+        "Low"
+      ],
+      "default": "Medium",
+      "title": "Severity"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "Vulnerability",
+        "Ransomware",
+        "Campaign",
+        "Malware",
+        "Breach",
+        "Advisory",
+        "Other"
+      ],
+      "default": "Other",
+      "title": "Threat Type"
+    },
+    "cve_id": {
+      "type": "string",
+      "title": "CVE ID"
+    },
+    "cvss_score": {
+      "type": "number",
+      "title": "CVSS Score"
+    },
+    "epss_score": {
+      "type": "number",
+      "title": "EPSS Score",
+      "description": "Exploit Prediction Scoring System probability (0-1) from FIRST.org \u2014 likelihood of exploitation in the next 30 days"
+    },
+    "epss_percentile": {
+      "type": "number",
+      "title": "EPSS Percentile",
+      "description": "Percentile rank (0-1) of EPSS score relative to all scored CVEs"
+    },
+    "attack_techniques": {
+      "type": "string",
+      "title": "MITRE ATT&CK Techniques",
+      "description": "JSON array of {id,name,tactic} mapped via AI enrichment, e.g. [{\"id\":\"T1566\",\"name\":\"Phishing\",\"tactic\":\"Initial Access\"}]"
+    },
+    "source": {
+      "type": "string",
+      "title": "Source",
+      "description": "e.g. CISA KEV, NVD, H-ISAC, Dark Reading"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "title": "Source URL"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "New",
+        "Analyzing",
+        "Mitigated"
+      ],
+      "default": "New",
+      "title": "Status"
+    },
+    "assigned_to": {
+      "type": "string",
+      "title": "Assigned To"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Analyst Notes"
+    },
+    "ticket_name": {
+      "type": "string",
+      "title": "Ticket Name",
+      "description": "JIRA or Cybellum ticket name associated with this threat"
+    },
+    "ticket_url": {
+      "type": "string",
+      "format": "uri",
+      "title": "Ticket URL",
+      "description": "Direct link to the tracking ticket in JIRA, Cybellum, or VRM tool"
+    },
+    "ticket_created": {
+      "type": "boolean",
+      "default": false,
+      "title": "Ticket Created",
+      "description": "True once a tracking ticket has been created for this threat"
+    },
+    "in_vrm": {
+      "type": "boolean",
+      "default": false,
+      "title": "In VRM",
+      "description": "True if this CVE is already tracked in the VRM tool (e.g. Cybellum, R7)"
+    },
+    "discuss_monday": {
+      "type": "boolean",
+      "default": false,
+      "title": "Discuss Monday",
+      "description": "Flag for weekly team meeting discussion"
+    },
+    "followup_actions": {
+      "type": "string",
+      "title": "Follow-up Actions",
+      "description": "Team meeting follow-up action items"
+    },
+    "zero_day": {
+      "type": "boolean",
+      "default": false,
+      "title": "Zero Day",
+      "description": "True if this is a zero-day vulnerability"
+    },
+    "briefing_tag": {
+      "type": "string",
+      "enum": [
+        "",
+        "talking_point",
+        "not_applicable",
+        "old",
+        "new",
+        "critical",
+        "high"
+      ],
+      "default": "",
+      "title": "Briefing Tag",
+      "description": "Manual highlight tag for weekly briefing row prioritization \u2014 drives row background color"
+    },
+    "affected_products": {
+      "type": "string",
+      "title": "Affected Products"
+    },
+    "estimated_downtime_hours": {
+      "type": "number",
+      "title": "Estimated Downtime (hours)",
+      "description": "Estimated potential system downtime based on severity and affected product portfolio breadth"
+    },
+    "estimated_recovery_cost": {
+      "type": "number",
+      "title": "Estimated Recovery Cost (USD)",
+      "description": "Estimated recovery cost based on severity and affected product portfolio breadth"
+    },
+    "first_response_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "First Response Date"
+    },
+    "closed_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Closed Date"
+    },
+    "sla_alert_sent": {
+      "type": "boolean",
+      "title": "SLA Breach Alert Sent",
+      "default": false,
+      "description": "True once an SLA breach alert has been emailed for this threat"
+    },
+    "retention_class": {
+      "type": "string",
+      "enum": [
+        "short",
+        "standard"
+      ],
+      "default": "standard",
+      "title": "Retention Class",
+      "description": "short = 30-day rolling retention (news/RSS); standard = 90-day rolling retention (CVEs/CISA KEV). Drives the nightly archival sweep."
+    },
+    "archived": {
+      "type": "boolean",
+      "default": false,
+      "title": "Archived",
+      "description": "True once the retention sweep has archived this threat out of the active trending window"
+    },
+    "last_reviewed_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Reviewed Date",
+      "description": "Timestamp of the most recent daily review mark on this threat"
+    },
+    "last_reviewed_by": {
+      "type": "string",
+      "title": "Last Reviewed By",
+      "description": "Display name of the analyst who last reviewed this threat"
+    },
+    "review_requested_to": {
+      "type": "string",
+      "title": "Review Requested To",
+      "description": "Display name or email of the team member asked to review this threat"
+    },
+    "review_requested_by": {
+      "type": "string",
+      "title": "Review Requested By",
+      "description": "Display name of the analyst who requested the review"
+    },
+    "review_requested_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Review Requested Date",
+      "description": "Timestamp when the review was requested"
+    }
+  },
+  "required": [
+    "title",
+    "severity",
+    "type",
+    "status"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "update": {},
+    "delete": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    }
+  }
+}

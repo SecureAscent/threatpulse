@@ -1,0 +1,98 @@
+{
+  "name": "SLAPolicy",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Policy Name"
+    },
+    "organization_id": {
+      "type": "string",
+      "title": "Organization ID"
+    },
+    "critical_hours": {
+      "type": "number",
+      "default": 1,
+      "title": "Critical SLA (hours)"
+    },
+    "high_hours": {
+      "type": "number",
+      "default": 4,
+      "title": "High SLA (hours)"
+    },
+    "medium_hours": {
+      "type": "number",
+      "default": 24,
+      "title": "Medium SLA (hours)"
+    },
+    "low_hours": {
+      "type": "number",
+      "default": 72,
+      "title": "Low SLA (hours)"
+    },
+    "escalation_email": {
+      "type": "string",
+      "format": "email",
+      "title": "Escalation Email"
+    },
+    "escalation_slack_webhook": {
+      "type": "string",
+      "format": "uri",
+      "title": "Slack Webhook URL"
+    },
+    "auto_escalate": {
+      "type": "boolean",
+      "default": true,
+      "title": "Auto-Escalate on Breach"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true,
+      "title": "Active"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

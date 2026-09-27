@@ -1,0 +1,147 @@
+{
+  "name": "SbomRecord",
+  "type": "object",
+  "properties": {
+    "component_name": {
+      "type": "string",
+      "title": "Component Name",
+      "description": "Software component / package name"
+    },
+    "component_version": {
+      "type": "string",
+      "title": "Version"
+    },
+    "vendor": {
+      "type": "string",
+      "title": "Vendor / Supplier"
+    },
+    "purl": {
+      "type": "string",
+      "title": "Package URL (PURL)",
+      "description": "Package URL standard identifier, e.g. pkg:npm/lodash@4.17.21"
+    },
+    "cpe": {
+      "type": "string",
+      "title": "CPE 2.3",
+      "description": "Common Platform Enumeration identifier"
+    },
+    "license": {
+      "type": "string",
+      "title": "License"
+    },
+    "dependency_type": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "transitive",
+        "unknown"
+      ],
+      "default": "direct",
+      "title": "Dependency Type"
+    },
+    "product_id": {
+      "type": "string",
+      "title": "Linked Product ID",
+      "description": "Reference to the Product entity this SBOM record belongs to"
+    },
+    "product_name": {
+      "type": "string",
+      "title": "Product Name",
+      "description": "Denormalized product name for quick reference"
+    },
+    "checksum": {
+      "type": "string",
+      "title": "Checksum / Hash"
+    },
+    "sbom_file_uri": {
+      "type": "string",
+      "title": "SBOM File URI",
+      "description": "Uploaded SBOM file reference"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "deprecated",
+        "retired"
+      ],
+      "default": "active",
+      "title": "Status"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "uploaded",
+        "cybellum",
+        "test"
+      ],
+      "default": "test",
+      "title": "Source",
+      "description": "How this SBOM record was added"
+    },
+    "organization_id": {
+      "type": "string",
+      "title": "Organization ID",
+      "description": "Tenant scope \u2014 required for multi-tenant isolation"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "component_name",
+    "component_version"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    }
+  }
+}

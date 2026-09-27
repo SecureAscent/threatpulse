@@ -1,0 +1,127 @@
+{
+  "name": "Product",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Product Name",
+      "description": "Portfolio asset name \u2014 should match threat affected_products for blast radius mapping"
+    },
+    "vendor": {
+      "type": "string",
+      "title": "Vendor"
+    },
+    "current_version": {
+      "type": "string",
+      "title": "Active Version",
+      "description": "Software version currently deployed / active"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "Active",
+        "Inactive",
+        "Retired"
+      ],
+      "default": "Active",
+      "title": "Status"
+    },
+    "end_of_life_date": {
+      "type": "string",
+      "format": "date",
+      "title": "End of Life Date"
+    },
+    "owner": {
+      "type": "string",
+      "title": "Owner"
+    },
+    "cpe_vendor": {
+      "type": "string",
+      "title": "CPE Vendor",
+      "description": "CPE 2.3 vendor identifier for automated CVE matching (e.g. 'microsoft', 'oracle')"
+    },
+    "cpe_product": {
+      "type": "string",
+      "title": "CPE Product",
+      "description": "CPE 2.3 product identifier for automated CVE matching (e.g. 'exchange_server', 'mysql')"
+    },
+    "keywords": {
+      "type": "string",
+      "title": "Matching Keywords",
+      "description": "Comma-separated keywords used to auto-match incoming CVEs (e.g. 'ActiveMQ, log4j, spring')"
+    },
+    "affiliated_software": {
+      "type": "string",
+      "title": "Affiliated Software",
+      "description": "Comma-separated alternative/affiliated software names for broader matching (e.g. 'Log4Shell, Log4j2')"
+    },
+    "sbom_enrolled": {
+      "type": "boolean",
+      "default": false,
+      "title": "SBOM Enrolled",
+      "description": "True if this product is enrolled in the SBOM / VRM tool for automated vulnerability tracking"
+    },
+    "organization_id": {
+      "type": "string",
+      "title": "Organization ID",
+      "description": "Tenant scope \u2014 required for multi-tenant isolation"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    }
+  }
+}
