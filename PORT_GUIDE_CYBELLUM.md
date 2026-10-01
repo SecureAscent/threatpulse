@@ -102,6 +102,27 @@ the connection's `organization_id` to the requesting user's organization.
 **Error handling:** 401/403 from Cybellum → throw "Cybellum auth failed — check the API token".
 404 on a path → try the next fallback path. Network error → break and try next path.
 
+### Backend Function: `syncAllCybellumConnections` (scheduled)
+
+**Input:** `{}` (service-role — no user session; runs from a cron trigger)
+**Behavior:**
+1. Load up to 200 **enabled** `CybellumConnection` records (all orgs). Return early if none.
+2. For each connection, resolve its `Organization` (by `organization_id`, else by
+   `members` containing the connection's `created_by_id`). Skip if the org is gone.
+3. Run the **same** sync logic as `syncCybellum` (products → `Product`, components →
+   `SbomRecord`, CVE findings → `Threat`) via a shared helper so both the on-demand
+   and scheduled paths stay identical. The helper is extracted into a shared module
+   (`base44/shared/cybellumSync.ts` in the SaaS app) — replicate it as a single
+   service function both the on-demand route and the cron job call.
+4. Per connection, update `last_synced_date`, `last_sync_summary`, and on error
+   `last_test_status='failed'` + `last_error`.
+5. Return `{ status, connections, results: [{ connection_id, organization, ok, summary, error }], totals }`.
+
+> The SaaS version runs this from a Base44 workflow that fires daily at 06:00 CT
+> (`Cybellum Scheduled Sync`). For the self-hosted stack, wire the same service function
+> to a cron runner (e.g. a Vercel cron route, a node-cron worker, or a systemd timer)
+> at the same cadence. The sync is idempotent (upserts), so a missed or double run is safe.
+
 ### Frontend invocation contract
 
 | Action        | SaaS call                                              | Self-hosted equivalent                          |
@@ -121,9 +142,11 @@ the connection's `organization_id` to the requesting user's organization.
 - **Routes:** create `nextjs_space/app/api/integrations/cybellum/route.ts` (GET list + POST
   create), `[...cybellum]/route.ts` (PATCH/DELETE by id), `test/route.ts`, and `sync/route.ts`.
   Guard every route with the org-membership middleware used by the Confluence/Jira routes.
-- **Sync job:** the SaaS version is on-demand (button). For parity you can keep it on-demand,
-  or add a scheduled runner (cron / worker) that iterates enabled connections per org and calls
-  the same sync logic — the function is already idempotent via upserts.
+- **Sync job:** the SaaS version has both an on-demand "Sync now" button (`syncCybellum`,
+  user-scoped) and a daily scheduled sweep (`syncAllCybellumConnections`, service-role,
+  06:00 CT). Both call the same shared sync helper — replicate that helper as a single
+  service function and expose it from both the on-demand route and a cron runner. The sync
+  is idempotent via upserts, so a missed or double run is safe.
 - **Cybellum API paths:** the endpoint lists in `syncCybellum` are defensive fallbacks. If your
   tenant exposes a different API version, update the `ENDPOINTS` map (products / components /
   findings) and the probe paths in `testCybellumConnection` to match.
