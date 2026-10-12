@@ -1,0 +1,59 @@
+{
+  "name": "Threat Feed Ingestion",
+  "description": "Pulls the latest alerts from all enabled threat intelligence sources every 2 hours, keeping the Threat feed current for dashboards, SLA monitoring, and the weekly executive summary.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "threat_feed_ingestion",
+      "version": "1.1",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "ingest_feeds": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "ingestFeeds",
+            "args": {}
+          },
+          "then": "ingest_hisac",
+          "x-base44": {
+            "title": "Ingest threat feeds",
+            "description": "Fetch and dedupe alerts from all enabled intelligence sources"
+          }
+        }
+      },
+      {
+        "ingest_hisac": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "ingestHisacEmails",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Ingest H-ISAC emails",
+            "description": "Read and parse H-ISAC threat bulletins from Gmail into Threat records"
+          }
+        }
+      }
+    ]
+  },
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 */2 * * *",
+      "one_time_date": null,
+      "timezone": "America/Chicago",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  }
+}

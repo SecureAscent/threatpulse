@@ -20,9 +20,36 @@ export default function BriefingRow({ threat, matchMap, updating, onToggle, onEd
   const matches = matchMap[threat.id] || [];
   const isUpdating = updating.has(threat.id);
   const tagConfig = TAG_CONFIG[threat.briefing_tag || ""] || TAG_CONFIG[""];
-  const dateStr = threat.created_date
+  // Show the CVE's actual publication date when NVD provides it; fall back to
+  // the ingestion (created_date) timestamp only when published_date is absent.
+  const dateStr = threat.published_date
+    ? new Date(threat.published_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : threat.created_date
     ? new Date(threat.created_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })
     : "—";
+  const altSources = (threat.alternate_sources || "")
+    .split(/[,;|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // "Updated" vs "New" is driven by NVD timestamps when available:
+  // lastModified > 1 day after published => Updated. When NVD dates are absent,
+  // fall back to multi-source attribution, then to a prior-year CVE ID as a
+  // last resort. NVD dates are authoritative — a prior-year CVE first
+  // published now is "New", not "Updated".
+  const isUpdated = (() => {
+    if (threat.last_modified_date && threat.published_date) {
+      const lm = new Date(threat.last_modified_date).getTime();
+      const pub = new Date(threat.published_date).getTime();
+      if (!isNaN(lm) && !isNaN(pub)) return lm - pub > 86400000;
+    }
+    if (threat.alternate_sources && threat.alternate_sources.trim()) return true;
+    const yearMatch = (threat.cve_id || "").match(/^CVE-(\d{4})-/i);
+    if (yearMatch) {
+      const cveYear = parseInt(yearMatch[1], 10);
+      if (cveYear < new Date().getFullYear()) return true;
+    }
+    return false;
+  })();
 
   return (
     <tr className={cn("border-t border-border hover:bg-accent/30 transition-colors", tagConfig.rowClass)}>
@@ -31,18 +58,29 @@ export default function BriefingRow({ threat, matchMap, updating, onToggle, onEd
         <RowTag value={threat.briefing_tag} loading={isUpdating} onChange={(v) => onEdit(threat.id, "briefing_tag", v)} />
       </td>
       <td className={`${TD} text-xs whitespace-nowrap`}>
-        {threat.source_url ? (
-          <a href={threat.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-            {threat.source || "—"}
-          </a>
-        ) : (
-          threat.source || "—"
-        )}
+        <div className="flex flex-col">
+          {threat.source_url ? (
+            <a href={threat.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+              {threat.source || "—"}
+            </a>
+          ) : (
+            threat.source || "—"
+          )}
+          {altSources.length > 0 && (
+            <span className="text-[10px] text-muted-foreground/70 leading-tight">{altSources.join(", ")}</span>
+          )}
+        </div>
       </td>
       <td className={`${TD} text-xs font-mono whitespace-nowrap`}>
         <Link to={`/threats/${threat.id}`} className="text-primary hover:underline">
           {threat.cve_id || "No CVE"}
         </Link>
+        <div className="flex items-center gap-1.5 mt-0.5 font-sans">
+          <span className="text-muted-foreground">{dateStr}</span>
+          <span className={cn("px-1 rounded text-[9px] font-semibold uppercase tracking-wide", isUpdated ? "bg-amber-500/15 text-amber-500" : "bg-emerald-500/15 text-emerald-500")}>
+            {isUpdated ? "Updated" : "New"}
+          </span>
+        </div>
       </td>
       <td className={`${TD} text-xs font-mono text-center`}>{threat.cvss_score ?? "—"}</td>
       <td className={TD}><SeverityBadge severity={threat.severity} /></td>

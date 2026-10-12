@@ -1,0 +1,40 @@
+{
+  "description": "When a new threat is created, check it against all enabled tenant watchlists and email alerts to watchlist owners on match.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "entity",
+      "events": [
+        "create"
+      ],
+      "entity_name": "Threat"
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "watchlist_alert",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "check_watchlist": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkWatchlistMatches",
+            "args": {
+              "threat_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Check watchlist matches",
+            "description": "Match new threat against tenant watchlists and alert owners"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Watchlist Alert"
+}

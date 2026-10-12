@@ -44,6 +44,16 @@
       "type": "number",
       "title": "CVSS Score"
     },
+    "cvss_version": {
+      "type": "string",
+      "title": "CVSS Version",
+      "description": "CVSS vector version from NVD, e.g. '3.1', '3.0', '2.0'"
+    },
+    "cpe": {
+      "type": "string",
+      "title": "CPE Matches",
+      "description": "Newline-separated CPE 2.3 identifiers from NVD configurations for this CVE"
+    },
     "epss_score": {
       "type": "number",
       "title": "EPSS Score",
@@ -53,6 +63,11 @@
       "type": "number",
       "title": "EPSS Percentile",
       "description": "Percentile rank (0-1) of EPSS score relative to all scored CVEs"
+    },
+    "risk_score": {
+      "type": "number",
+      "title": "ThreatPulse Risk Score",
+      "description": "Composite 0-100 score blending CVSS impact (35%), EPSS likelihood (30%), portfolio blast radius (25%), and source reliability (10%). Computed at ingest time."
     },
     "attack_techniques": {
       "type": "string",
@@ -68,6 +83,23 @@
       "type": "string",
       "format": "uri",
       "title": "Source URL"
+    },
+    "alternate_sources": {
+      "type": "string",
+      "title": "Alternate Sources",
+      "description": "Comma-separated additional source names reporting the same CVE \u2014 populated by ingest-time merge dedup so one record carries multi-source attribution"
+    },
+    "published_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Published Date",
+      "description": "NVD 'published' timestamp \u2014 when the CVE was first published. Used to distinguish New vs Updated."
+    },
+    "last_modified_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Modified Date",
+      "description": "NVD 'lastModified' timestamp \u2014 when the CVE entry was last updated. When later than published_date, the threat is flagged 'Updated' rather than 'New'."
     },
     "status": {
       "type": "string",

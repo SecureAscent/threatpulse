@@ -1,0 +1,44 @@
+{
+  "description": "Every 30 minutes, checks Critical and High severity threats and emails the team when one isn't mitigated within its SLA timeframe (Critical 1h, High 4h).",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "sla_breach_alert",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "check_sla_breaches": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "slaBreachAlert"
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Check SLA breaches",
+            "description": "Alert on unresolved high-severity threats"
+          }
+        }
+      }
+    ]
+  },
+  "name": "SLA Breach Alert",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "*/30 * * * *",
+      "one_time_date": null,
+      "timezone": "America/Chicago",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  }
+}

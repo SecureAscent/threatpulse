@@ -109,7 +109,6 @@ export default function Home() {
                 {l.label}
               </a>
             ))}
-            <Link to="/shop" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Shop</Link>
             <Link to="/pricing" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Pricing</Link>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -134,7 +133,6 @@ export default function Home() {
                   {l.label}
                 </a>
               ))}
-              <Link to="/shop" onClick={() => setMobileOpen(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">Shop</Link>
               <Link to="/pricing" onClick={() => setMobileOpen(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">Pricing</Link>
               <Link to="/login" onClick={() => setMobileOpen(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors sm:hidden">Sign in</Link>
               <Link to="/free" onClick={() => setMobileOpen(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors sm:hidden">Live Preview</Link>
@@ -463,7 +461,6 @@ export default function Home() {
                 <li><Link to="/threat-feed" className="text-muted-foreground hover:text-foreground transition-colors">Threat Feed</Link></li>
                 <li><Link to="/blast-radius" className="text-muted-foreground hover:text-foreground transition-colors">Blast Radius</Link></li>
                 <li><Link to="/product-portfolio" className="text-muted-foreground hover:text-foreground transition-colors">Product Portfolio</Link></li>
-                <li><Link to="/shop" className="text-muted-foreground hover:text-foreground transition-colors">ThreatPulse Gear</Link></li>
                 <li><Link to="/pricing" className="text-muted-foreground hover:text-foreground transition-colors">Pricing</Link></li>
               </ul>
             </div>

@@ -48,31 +48,44 @@ export function buildThreatListCSV(threats) {
   return rowsToCsv(rows);
 }
 
-const BRIEFING_COLS = [
-  ["Date Added", (t) => t.created_date ? new Date(t.created_date).toLocaleDateString() : ""],
-  ["Source", (t) => t.source || ""],
-  ["CVE", (t) => t.cve_id || ""],
-  ["In VRM?", (t) => t.in_vrm ? "Y" : "N"],
-  ["CVSS Score", (t) => t.cvss_score ?? ""],
-  ["Severity", (t) => t.severity || ""],
-  ["Description", (t) => t.description || ""],
-  ["Ticket Name", (t) => t.ticket_name || ""],
-  ["Ticket URL", (t) => t.ticket_url || ""],
-  ["Ticket Created?", (t) => t.ticket_created ? "Y" : "N"],
-  ["Source URL", (t) => t.source_url || ""],
-  ["Matched Products", (t) => (t._matchedProducts || []).map((m) => m.product.name).join("; ")],
-  ["Match Types", (t) => [...new Set((t._matchedProducts || []).map((m) => m.matchType))].join(", ")],
-  ["SBOM Enrolled?", (t) => (t._matchedProducts || []).some((m) => m.isEnrolled) ? "Y" : "N"],
-  ["Discuss Monday?", (t) => t.discuss_monday ? "Y" : "N"],
-  ["Zero Day?", (t) => t.zero_day ? "Y" : "N"],
-  ["Notes", (t) => t.notes || ""],
-  ["Follow-up Actions", (t) => t.followup_actions || ""],
-  ["Threat ID", (t) => t.id],
-];
+// Vulnerability Inbox export — matches the reference .xlsx layout exactly:
+// Data Added | Source | CVE | In R7? | CVSS Version | CVSS Score | Description | Ticket | URL | CPE
+// CVE, Ticket and URL are emitted as Excel =HYPERLINK formulas whose target URL
+// embeds the CVE id. linkConfig supplies the tenant-specific Jira/Cybellum bases.
+function briefingCols(linkConfig = {}) {
+  const jiraSite = linkConfig.jira_site_url;
+  const jiraProject = linkConfig.jira_project_key;
+  const cybellumBase = linkConfig.cybellum_base_url;
+  return [
+    ["Data Added", (t) => (t.created_date ? new Date(t.created_date).toLocaleDateString() : "")],
+    ["Source", (t) => t.source || ""],
+    ["CVE", (t) => {
+      if (!t.cve_id) return "";
+      const url = `https://nvd.nist.gov/vuln/detail/${t.cve_id}`;
+      return `=HYPERLINK("${url}","${t.cve_id}")`;
+    }],
+    ["In R7?", (t) => (t.in_vrm ? "Y" : "N")],
+    ["CVSS Version", (t) => t.cvss_version || ""],
+    ["CVSS Score", (t) => t.cvss_score ?? ""],
+    ["Description", (t) => t.description || ""],
+    ["Ticket", (t) => {
+      if (!t.cve_id || !jiraSite || !jiraProject) return t.ticket_url || "";
+      const url = `${jiraSite}/issues/?jql=project=${jiraProject} AND text~${t.cve_id}`;
+      return `=HYPERLINK("${url}","${url}")`;
+    }],
+    ["URL", (t) => {
+      if (!t.cve_id || !cybellumBase) return "";
+      const url = `${cybellumBase}/vulnerabilities-directory?table_search=${t.cve_id}&globalVulnId=${t.cve_id}`;
+      return `=HYPERLINK("${url}","${url}")`;
+    }],
+    ["CPE", (t) => t.cpe || ""],
+  ];
+}
 
-export function buildWeeklyBriefingCSV(threats) {
-  const rows = [BRIEFING_COLS.map((c) => c[0])];
-  (threats || []).forEach((t) => rows.push(BRIEFING_COLS.map((c) => c[1](t) ?? "")));
+export function buildWeeklyBriefingCSV(threats, linkConfig = {}) {
+  const cols = briefingCols(linkConfig);
+  const rows = [cols.map((c) => c[0])];
+  (threats || []).forEach((t) => rows.push(cols.map((c) => c[1](t) ?? "")));
   return rowsToCsv(rows);
 }
 

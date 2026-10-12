@@ -1,0 +1,66 @@
+{
+  "name": "ApiUsage",
+  "type": "object",
+  "properties": {
+    "api_key_id": {
+      "type": "string",
+      "title": "API Key ID",
+      "description": "Reference to the ApiKey this usage record tracks"
+    },
+    "date": {
+      "type": "string",
+      "title": "Date (YYYY-MM-DD)",
+      "description": "Calendar day this usage bucket covers"
+    },
+    "count": {
+      "type": "number",
+      "default": 0,
+      "title": "Request Count",
+      "description": "Number of API requests made with this key on this date"
+    },
+    "last_request": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Request"
+    }
+  },
+  "required": [
+    "api_key_id",
+    "date"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "create": {},
+    "update": {},
+    "delete": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    }
+  }
+}

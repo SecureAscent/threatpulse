@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { Loader2, RefreshCw, AlertCircle, FileText } from "lucide-react";
+import { Loader2, RefreshCw, AlertCircle, FileText, Zap, Globe, Flame, ShieldAlert, Target } from "lucide-react";
 import {
   BRIEF_PERIODS,
   periodHeading,
   periodVolumeLabel,
   filterByDays,
+  filterByDateRange,
   computeBriefStats,
   priorityVulns,
   exposureMatches,
@@ -19,6 +20,7 @@ import BriefExposureActions from "@/components/weekly/brief/BriefExposureActions
 const SCHEMA = {
   type: "object",
   properties: {
+    bluf: { type: "string" },
     executive_summary: { type: "string" },
     landscape_bullets: { type: "array", items: { type: "string" } },
     attack_surface_title: { type: "string" },
@@ -37,6 +39,7 @@ function buildPrompt(ctx) {
     "for C-suite leadership. Use ONLY the real data below — never invent CVEs or numbers.",
     "",
     "Return:",
+    "- bluf: ONE single sentence (max 25 words) Bottom Line Up Front — the single most important thing leadership must know right now. Start with the core risk or action, name the top CVE/product if relevant.",
     "- executive_summary: 3-4 sentence paragraph summarizing volume, critical vulns, CISA KEV adds, and the most urgent risks (name specific CVEs/products from the data).",
     "- landscape_bullets: 4-6 short bullet strings (no bullet prefix) covering volume, critical/high counts, KEV adds, notable exploitation, ransomware activity.",
     "- attack_surface_title: 2-4 word label for the primary attack surface this period (e.g. 'EDGE INFRASTRUCTURE', 'EDGE + IDENTITY').",
@@ -50,12 +53,18 @@ function buildPrompt(ctx) {
   ].join("\n");
 }
 
-export default function ThreatBriefReport({ threats, products, period, onPeriodChange }) {
+export default function ThreatBriefReport({ threats, products, period, onPeriodChange, dateRange }) {
   const [narrative, setNarrative] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const inRange = useMemo(() => filterByDays(threats, period.days), [threats, period.days]);
+  const inRange = useMemo(
+    () =>
+      dateRange && (dateRange.start || dateRange.end)
+        ? filterByDateRange(threats, dateRange.start, dateRange.end)
+        : filterByDays(threats, period.days),
+    [threats, period.days, dateRange]
+  );
   const stats = useMemo(() => computeBriefStats(inRange), [inRange]);
   const vulns = useMemo(() => priorityVulns(inRange), [inRange]);
   const exposure = useMemo(() => exposureMatches(inRange, products), [inRange, products]);
@@ -90,14 +99,14 @@ export default function ThreatBriefReport({ threats, products, period, onPeriodC
 
   useEffect(() => {
     generate();
-  }, [period.key, threats, products]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period.key, threats, products, dateRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exposureHeadline =
     exposure.count > 0 ? `${exposure.count} Portfolio Match${exposure.count === 1 ? "" : "es"} Found` : "No Confirmed Company-Specific Exposure";
 
   return (
     <div id="threat-brief-report" className="rounded-xl overflow-hidden border border-[#1c3350] bg-[#0a1526] mb-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-[#0f2135] border-b border-[#1c3350]">
+      <div data-html2canvas-ignore="true" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-[#0f2135] border-b border-[#1c3350]">
         <div className="flex items-center gap-2 text-slate-300">
           <FileText className="w-4 h-4 text-cyan-400" />
           <span className="text-xs font-semibold uppercase tracking-wide">ThreatPulse Intel Brief</span>
@@ -130,7 +139,7 @@ export default function ThreatBriefReport({ threats, products, period, onPeriodC
       {!inRange.length ? (
         <div className="py-16 text-center text-slate-400 text-sm">No threats in this period yet.</div>
       ) : (
-        <div className="p-5 space-y-4">
+        <div id="threat-brief-content" className="p-5 space-y-4">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-cyan-400">
               THREATPULSE INTEL // {period.label.toUpperCase()} THREAT BRIEF //
@@ -158,15 +167,27 @@ export default function ThreatBriefReport({ threats, products, period, onPeriodC
             </div>
           ) : narrative ? (
             <>
+              {narrative.bluf && (
+                <div className="rounded-lg overflow-hidden border border-cyan-400/40 bg-gradient-to-r from-[#0f2135] to-[#132941]">
+                  <div className="flex items-center gap-2 px-4 py-2 bg-cyan-500/10 border-b border-cyan-400/20">
+                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Bottom Line Up Front</span>
+                  </div>
+                  <div className="px-4 py-4">
+                    <p className="text-base font-bold text-white leading-snug">{narrative.bluf}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-lg overflow-hidden border border-[#1c3350]">
-                <BriefSectionHeader label="2-Minute Read" title="Executive Summary" />
+                <BriefSectionHeader icon={FileText} accent="cyan" label="2-Minute Read" title="Executive Summary" />
                 <div className="bg-[#132941] border-l-4 border-cyan-400 px-4 py-3.5">
                   <p className="text-sm text-slate-200 leading-relaxed">{narrative.executive_summary}</p>
                 </div>
               </div>
 
               <div className="rounded-lg overflow-hidden border border-[#1c3350]">
-                <BriefSectionHeader label="What Changed" title="Threat Landscape" />
+                <BriefSectionHeader icon={Globe} accent="blue" label="What Changed" title="Threat Landscape" />
                 <BriefLandscape
                   bullets={narrative.landscape_bullets || []}
                   attackSurface={{ title: narrative.attack_surface_title, description: narrative.attack_surface_description }}
@@ -174,12 +195,12 @@ export default function ThreatBriefReport({ threats, products, period, onPeriodC
               </div>
 
               <div className="rounded-lg overflow-hidden border border-[#1c3350]">
-                <BriefSectionHeader label="Priority Queue" title="Critical Vulnerabilities" />
+                <BriefSectionHeader icon={Flame} accent="rose" label="Priority Queue" title="Critical Vulnerabilities" />
                 <BriefPriorityQueue vulns={vulns} />
               </div>
 
               <div className="rounded-lg overflow-hidden border border-[#1c3350]">
-                <BriefSectionHeader label="Decision Support" title="Exposure & Response" />
+                <BriefSectionHeader icon={ShieldAlert} accent="amber" label="Decision Support" title="Exposure & Response" />
                 <BriefExposureActions
                   exposureItems={narrative.exposure_items || []}
                   exposureHeadline={exposureHeadline}
@@ -188,7 +209,7 @@ export default function ThreatBriefReport({ threats, products, period, onPeriodC
               </div>
 
               <div className="rounded-lg overflow-hidden border border-[#1c3350]">
-                <BriefSectionHeader label="Key Takeaway" title="Leadership Focus" />
+                <BriefSectionHeader icon={Target} accent="emerald" label="Key Takeaway" title="Leadership Focus" />
                 <div className="bg-[#0f2135] px-4 py-4">
                   <p className="text-sm font-semibold text-white leading-relaxed">{narrative.key_takeaway}</p>
                 </div>

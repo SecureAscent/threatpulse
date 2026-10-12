@@ -71,6 +71,11 @@
       "title": "Retention (days)",
       "description": "Data retention window for this organization"
     },
+    "jira_webhook_token": {
+      "type": "string",
+      "title": "Jira Webhook Token",
+      "description": "Per-tenant token for validating incoming Jira webhooks \u2014 auto-generated on first setup"
+    },
     "notes": {
       "type": "string",
       "title": "Notes"

@@ -33,18 +33,41 @@ export function filterByDays(threats, days) {
   return threats.filter((t) => new Date(t.created_date).getTime() >= since);
 }
 
+export function filterByDateRange(threats, startDate, endDate) {
+  const start = startDate ? new Date(startDate + "T00:00:00").getTime() : 0;
+  const end = endDate ? new Date(endDate + "T23:59:59").getTime() : Date.now();
+  return threats.filter((t) => {
+    const t0 = new Date(t.created_date).getTime();
+    return t0 >= start && t0 <= end;
+  });
+}
+
+// A threat is a CISA KEV add when either its primary source OR any of its
+// merged alternate_sources is "CISA KEV". Ingest merge-dedup keeps one record
+// per CVE, so a CVE first seen from NVD carries "CISA KEV" only in
+// alternate_sources — checking source alone undercounts KEV adds.
+export function isCisaKev(t) {
+  if ((t.source || "").trim().toLowerCase() === "cisa kev") return true;
+  const alts = (t.alternate_sources || "")
+    .split(/[,;|]/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return alts.includes("cisa kev");
+}
+
 export function computeBriefStats(inRange) {
-  const newCves = inRange.filter((t) => t.cve_id).length || inRange.length;
+  const total = inRange.length;
+  const cveCount = inRange.filter((t) => t.cve_id).length;
   const critical = inRange.filter((t) => t.severity === "Critical").length;
   const high = inRange.filter((t) => t.severity === "High").length;
-  const kevCount = inRange.filter((t) => (t.source || "") === "CISA KEV").length;
-  const pct = (n) => (newCves ? Math.round((n / newCves) * 1000) / 10 : 0);
-  return { newCves, critical, high, kevCount, criticalPct: pct(critical), highPct: pct(high) };
+  const kevCount = inRange.filter((t) => isCisaKev(t)).length;
+  const pct = (n) => (total ? Math.round((n / total) * 1000) / 10 : 0);
+  return { total, cveCount, critical, high, kevCount, criticalPct: pct(critical), highPct: pct(high) };
 }
 
 export function priorityVulns(inRange, limit = 6) {
   const candidates = inRange.filter(
-    (t) => t.severity === "Critical" || (t.source || "") === "CISA KEV" || t.zero_day
+    (t) => t.severity === "Critical" || isCisaKev(t) || t.zero_day
   );
   return candidates
     .sort((a, b) => (b.cvss_score || 0) - (a.cvss_score || 0))
@@ -52,13 +75,15 @@ export function priorityVulns(inRange, limit = 6) {
     .map((t) => {
       let status = "HIGH";
       if (t.zero_day) status = "ZERO-DAY ACTIVE";
-      else if ((t.source || "") === "CISA KEV") status = "CISA KEV";
+      else if (isCisaKev(t)) status = "CISA KEV";
       else if (t.severity === "Critical") status = "CRITICAL";
       return {
         cve_id: t.cve_id || null,
-        title: t.affected_products || t.title,
+        title: t.title,
         description: t.description || t.title,
         status,
+        cvss_score: t.cvss_score || null,
+        severity: t.severity || null,
       };
     });
 }
