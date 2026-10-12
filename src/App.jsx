@@ -10,9 +10,7 @@ import ScrollToTop from './components/ScrollToTop';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import Home from '@/pages/Home';
-import Shop from '@/pages/Shop';
 import Pricing from '@/pages/Pricing';
-import CreateProduct from '@/pages/CreateProduct';
 import FreePreview from '@/pages/FreePreview';
 import Dashboard from '@/pages/Dashboard';
 import ActiveIncidents from '@/pages/ActiveIncidents';
@@ -57,12 +55,15 @@ import ApiKeys from '@/pages/ApiKeys';
 import SLAPolicies from '@/pages/SLAPolicies';
 import TrustCenter from '@/pages/TrustCenter';
 import DailyReviewAudit from '@/pages/DailyReviewAudit';
+import MonthlyReport from '@/pages/MonthlyReport';
+import MobileReview from '@/pages/MobileReview';
 import SbomCmdb from '@/pages/SbomCmdb';
+import ProductVulnerabilities from '@/pages/ProductVulnerabilities';
 
 const AUTH_ROUTES = ["/login", "/register", "/forgot-password", "/reset-password"];
 
 // Public marketing pages that anyone can view without being logged in.
-const PUBLIC_ROUTES = ["/", "/shop", "/pricing", "/free", "/contact-sales", "/investors", "/trust-center"];
+const PUBLIC_ROUTES = ["/", "/pricing", "/free", "/contact-sales", "/investors", "/trust-center"];
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -109,7 +110,6 @@ const AuthenticatedApp = () => {
     <Routes>
       {/* Add your page Route elements here */}
       <Route path="/" element={<Home />} />
-      <Route path="/shop" element={<Shop />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/free" element={<FreePreview />} />
       <Route path="/contact-sales" element={<ContactSales />} />
@@ -146,7 +146,10 @@ const AuthenticatedApp = () => {
           <Route path="/executive-dashboard" element={<ExecutiveDashboard />} />
           <Route path="/weekly-briefing" element={<WeeklyBriefing />} />
           <Route path="/daily-review-audit" element={<DailyReviewAudit />} />
+          <Route path="/monthly-report" element={<MonthlyReport />} />
+          <Route path="/mobile-review" element={<MobileReview />} />
           <Route path="/sbom-cmdb" element={<SbomCmdb />} />
+          <Route path="/product-vulnerabilities" element={<ProductVulnerabilities />} />
           <Route path="/product-portfolio" element={<ProductPortfolio />} />
           <Route path="/actioned-threats" element={<ActionedThreats />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
@@ -157,7 +160,6 @@ const AuthenticatedApp = () => {
           <Route path="/api-keys" element={<ApiKeys />} />
           <Route path="/sla-policies" element={<SLAPolicies />} />
           <Route path="/admin/setup" element={<AdminSetup />} />
-          <Route path="/admin/create-product" element={<CreateProduct />} />
           <Route path="/settings/security" element={<SettingsSecurity />} />
           <Route path="/settings/notifications" element={<SettingsNotifications />} />
         </Route>

@@ -50,6 +50,13 @@ export default function ApiKeys() {
     queryFn: () => base44.entities.ApiKey.list("-created_date", 50),
   });
 
+  const { data: usageRecords = [] } = useQuery({
+    queryKey: ["api-usage-today"],
+    queryFn: () => base44.entities.ApiUsage.filter({ date: new Date().toISOString().slice(0, 10) }, "-count", 100),
+  });
+  const usageMap = {};
+  (usageRecords || []).forEach((u) => { usageMap[u.api_key_id] = u.count || 0; });
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setError("");
@@ -121,7 +128,7 @@ export default function ApiKeys() {
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
               Use your API key in the <code className="font-mono text-primary">Authorization: Bearer tp_live_…</code> header.
               Base URL: <code className="font-mono text-primary">https://spectral-pulse-guard-pro.base44.app/functions</code>.
-              Rate limit: 100 req/min per key.
+              Rate limits: 1,000/day (Free), 10,000/day (SMB), 100,000/day (Enterprise).
             </p>
           </div>
         </div>
@@ -146,6 +153,7 @@ export default function ApiKeys() {
                 <th className="text-left px-5 py-3 font-medium hidden sm:table-cell">Prefix</th>
                 <th className="text-left px-5 py-3 font-medium hidden md:table-cell">Scopes</th>
                 <th className="text-left px-5 py-3 font-medium hidden lg:table-cell">Expires</th>
+                <th className="text-left px-5 py-3 font-medium hidden sm:table-cell">Usage Today</th>
                 <th className="text-left px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -158,6 +166,10 @@ export default function ApiKeys() {
                   <td className="px-5 py-3 text-xs text-muted-foreground hidden md:table-cell">{k.scopes || "—"}</td>
                   <td className="px-5 py-3 text-xs text-muted-foreground hidden lg:table-cell">
                     {k.expires_at ? new Date(k.expires_at).toLocaleDateString() : "Never"}
+                  </td>
+                  <td className="px-5 py-3 text-xs hidden sm:table-cell">
+                    <span className="font-medium text-foreground">{usageMap[k.id] || 0}</span>
+                    <span className="text-muted-foreground"> / day</span>
                   </td>
                   <td className="px-5 py-3">
                     {k.active ? (

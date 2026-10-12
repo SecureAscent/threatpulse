@@ -1,0 +1,45 @@
+{
+  "name": "Cybellum Scheduled Sync",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 6 * * *",
+      "one_time_date": null,
+      "timezone": "America/Chicago",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Daily sync of all enabled Cybellum connections across every organization \u2014 pulls products, SBOM components, and vulnerability findings into ThreatPulse.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "cybellum_scheduled_sync",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "sync_all": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "syncAllCybellumConnections",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Sync all Cybellum connections",
+            "description": "Iterates enabled connections and pulls products/SBOM/findings"
+          }
+        }
+      }
+    ]
+  }
+}

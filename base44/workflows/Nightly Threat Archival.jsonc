@@ -1,0 +1,45 @@
+{
+  "name": "Nightly Threat Archival",
+  "description": "Archives threats past their retention window (30-day news, 90-day CVEs) every night at 2am, preserving unresolved Critical/High items for the active trending window.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 2 * * *",
+      "one_time_date": null,
+      "timezone": "America/Chicago",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "nightly_threat_archival",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "archive": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "archiveStaleThreats",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Archive stale threats",
+            "description": "Mark past-retention threats as archived"
+          }
+        }
+      }
+    ]
+  }
+}

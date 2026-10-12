@@ -5,11 +5,12 @@ import { Download, FileDown, Loader2, CalendarDays, Mail } from "lucide-react";
 import { filterByRange } from "@/lib/executiveData";
 import { batchMatchThreats } from "@/lib/productCpeMatch";
 import { buildWeeklyBriefingCSV, downloadCsv } from "@/lib/csvExport";
-import { BRIEF_PERIODS } from "@/lib/threatBriefData";
+import { BRIEF_PERIODS, filterByDateRange } from "@/lib/threatBriefData";
 import BriefingSummary from "@/components/weekly/BriefingSummary";
 import BriefingRow from "@/components/weekly/BriefingRow";
 import SourceFilter from "@/components/weekly/SourceFilter";
 import ThreatBriefReport from "@/components/weekly/ThreatBriefReport";
+import DateRangePicker from "@/components/weekly/DateRangePicker";
 
 const TH = "text-left px-3 py-2.5 font-medium whitespace-nowrap";
 
@@ -22,6 +23,7 @@ export default function WeeklyBriefing() {
   const [updating, setUpdating] = useState(new Set());
   const [selectedSources, setSelectedSources] = useState(null);
   const [filterMode, setFilterMode] = useState("include");
+  const [dateRange, setDateRange] = useState({ start: "", end: "" });
 
   const { data: threats = [], isLoading } = useQuery({
     queryKey: ["threats", "briefing"],
@@ -33,7 +35,21 @@ export default function WeeklyBriefing() {
     queryFn: () => base44.entities.Product.list(),
   });
 
-  const filtered = useMemo(() => filterByRange(threats, period.days * 24), [threats, period.days]);
+  const { data: linkConfig = {} } = useQuery({
+    queryKey: ["export-links-config"],
+    queryFn: async () => {
+      const res = await base44.functions.invoke("getExportLinksConfig", {});
+      return res.data || {};
+    },
+  });
+
+  const filtered = useMemo(
+    () =>
+      dateRange.start || dateRange.end
+        ? filterByDateRange(threats, dateRange.start, dateRange.end)
+        : filterByRange(threats, period.days * 24),
+    [threats, period.days, dateRange]
+  );
 
   const allSources = useMemo(
     () => Array.from(new Set(filtered.map((t) => t.source).filter(Boolean))).sort(),
@@ -102,7 +118,7 @@ export default function WeeklyBriefing() {
   };
 
   const handleExportCsv = () => {
-    const csv = buildWeeklyBriefingCSV(enriched);
+    const csv = buildWeeklyBriefingCSV(enriched, linkConfig);
     downloadCsv(`threatpulse-weekly-briefing-${new Date().toISOString().slice(0, 10)}.csv`, csv);
   };
 
@@ -122,10 +138,12 @@ export default function WeeklyBriefing() {
   const handleExportPdf = async () => {
     setExporting(true);
     try {
-      const { exportElementToPdf } = await import("@/lib/exportPdf");
-      await exportElementToPdf(
-        "weekly-briefing-table",
-        `threatpulse-briefing-${period.key}.pdf`
+      const { exportBriefToPdf } = await import("@/lib/exportPdf");
+      await exportBriefToPdf(
+        "threat-brief-content",
+        `threatpulse-brief-${period.key}-${new Date().toISOString().slice(0, 10)}.pdf`,
+        `ThreatPulse Intel  •  threatpulseintel.com  •  ${period.label} Executive Intelligence`,
+        2
       );
     } finally {
       setExporting(false);
@@ -142,11 +160,15 @@ export default function WeeklyBriefing() {
             Weekly Vulnerability Briefing
           </h1>
           <p className="text-sm text-muted-foreground">
-            {period.label} · {enriched.length} CVEs · {summary.matched} matched to portfolio · Generated{" "}
+            {dateRange.start || dateRange.end
+              ? `${dateRange.start || "Start"} → ${dateRange.end || "Today"}`
+              : period.label}{" "}
+            · {enriched.length} threats · {summary.matched} matched to portfolio · Generated{" "}
             {new Date().toLocaleString()}
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
           <SourceFilter
             sources={allSources}
             selected={activeSources}
@@ -198,7 +220,7 @@ export default function WeeklyBriefing() {
         </div>
       ) : (
         <>
-          <ThreatBriefReport threats={threats} products={products} period={period} onPeriodChange={setPeriod} />
+          <ThreatBriefReport threats={threats} products={products} period={period} onPeriodChange={setPeriod} dateRange={dateRange} />
 
           <BriefingSummary stats={summary} />
 

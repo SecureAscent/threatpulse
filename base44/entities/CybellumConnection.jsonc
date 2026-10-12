@@ -1,0 +1,127 @@
+{
+  "name": "CybellumConnection",
+  "type": "object",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "title": "Display Name",
+      "description": "Friendly label for this Cybellum tenant"
+    },
+    "base_url": {
+      "type": "string",
+      "format": "uri",
+      "title": "Base URL",
+      "description": "Cybellum tenant API base URL, e.g. https://your-tenant.cybellum.com"
+    },
+    "api_token": {
+      "type": "string",
+      "title": "API Token",
+      "description": "Per-tenant Cybellum API token. Treated as a secret \u2014 only org members and admins can read it."
+    },
+    "organization_id": {
+      "type": "string",
+      "title": "Organization ID",
+      "description": "Tenant scope \u2014 the ThreatPulse organization this Cybellum connection belongs to"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "title": "Enabled"
+    },
+    "last_tested_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Tested"
+    },
+    "last_test_status": {
+      "type": "string",
+      "enum": [
+        "untested",
+        "success",
+        "failed"
+      ],
+      "default": "untested",
+      "title": "Last Test Status"
+    },
+    "last_error": {
+      "type": "string",
+      "title": "Last Error"
+    },
+    "last_synced_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Synced"
+    },
+    "last_sync_summary": {
+      "type": "string",
+      "title": "Last Sync Summary",
+      "description": "Human-readable summary of the most recent sync run (counts of products/components/findings processed)"
+    },
+    "cybellum_user_key": {
+      "type": "string",
+      "title": "Cybellum User Key",
+      "description": "Account/user identifier returned by a successful connection test"
+    }
+  },
+  "required": [
+    "base_url",
+    "api_token",
+    "organization_id"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "data.organization_id": "{{user.data.organization_id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.organization_id": "{{user.data.organization_id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "user_condition": {
+            "role": "superadmin"
+          }
+        }
+      ]
+    }
+  }
+}

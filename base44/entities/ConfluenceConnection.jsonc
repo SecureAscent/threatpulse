@@ -1,0 +1,103 @@
+{
+  "name": "ConfluenceConnection",
+  "type": "object",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "title": "Display Name",
+      "description": "Friendly label for this Confluence instance"
+    },
+    "base_url": {
+      "type": "string",
+      "format": "uri",
+      "title": "Base URL",
+      "description": "Confluence instance URL, e.g. https://your-team.atlassian.net or https://confluence.your-company.com"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email / Username",
+      "description": "Atlassian account email (Cloud) or username (Server / Data Center)"
+    },
+    "api_token": {
+      "type": "string",
+      "title": "API Token",
+      "description": "Confluence Cloud API token or Server / Data Center personal access token. Treated as a secret \u2014 only the owner can read it."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "title": "Enabled"
+    },
+    "last_tested_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Last Tested"
+    },
+    "last_test_status": {
+      "type": "string",
+      "enum": [
+        "untested",
+        "success",
+        "failed"
+      ],
+      "default": "untested",
+      "title": "Last Test Status"
+    },
+    "last_error": {
+      "type": "string",
+      "title": "Last Error"
+    },
+    "confluence_user_key": {
+      "type": "string",
+      "title": "Confluence User Key",
+      "description": "accountId (Cloud) or userKey (Server) returned by a successful connection test"
+    }
+  },
+  "required": [
+    "base_url",
+    "email",
+    "api_token"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

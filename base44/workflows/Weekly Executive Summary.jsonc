@@ -1,0 +1,45 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "weekly_executive_summary",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "send_summary": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "sendWeeklyExecutiveSummary",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Send weekly executive summary",
+            "description": "Compile and email the weekly briefing"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Weekly Executive Summary",
+  "description": "Compiles the week's threat intelligence into an executive-level summary email and sends it to admin users every Monday at 8am.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 8 * * 1",
+      "one_time_date": null,
+      "timezone": "America/Chicago",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  }
+}

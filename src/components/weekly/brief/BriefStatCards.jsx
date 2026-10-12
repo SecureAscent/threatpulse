@@ -2,9 +2,9 @@ import React from "react";
 
 export default function BriefStatCards({ stats, volumeLabel }) {
   const items = [
-    { value: stats.newCves.toLocaleString(), label: "New CVEs", sub: volumeLabel },
-    { value: stats.critical.toLocaleString(), label: "Critical", sub: `${stats.criticalPct}%+ of new CVEs` },
-    { value: stats.high.toLocaleString(), label: "High", sub: `${stats.highPct}%+ of new CVEs` },
+    { value: stats.total.toLocaleString(), label: "New Threats", sub: `${stats.cveCount} with CVE IDs · ${volumeLabel}` },
+    { value: stats.critical.toLocaleString(), label: "Critical", sub: `${stats.criticalPct}% of new threats` },
+    { value: stats.high.toLocaleString(), label: "High", sub: `${stats.highPct}% of new threats` },
     { value: stats.kevCount.toLocaleString(), label: "CISA KEVs", sub: "confirmed exploitation" },
   ];
   return (
